@@ -19,6 +19,7 @@ from typing import Tuple
 from functools import wraps
 
 import redis.asyncio as redis
+import redis as redis_sync
 from redis.exceptions import (
     BusyLoadingError,
     ConnectionError as RedisConnectionError,
@@ -81,6 +82,15 @@ class RedisConfig:
         
         return redis.Redis(**kwargs)
 
+    def create_sync_client(self, db: Optional[int] = None) -> redis_sync.Redis:
+        """Create synchronous Redis client (for RQ/Scheduler)."""
+        kwargs = self.connection_kwargs.copy()
+        # RQ expects byte responses; avoid automatic decoding
+        kwargs["decode_responses"] = False
+        if db is not None:
+            kwargs["db"] = db
+        return redis_sync.Redis(**kwargs)
+
 
 # Global Redis clients
 _redis_config = RedisConfig()
@@ -90,6 +100,9 @@ redis_client = _redis_config.create_client()
 
 # Separate client for job queues (uses DB 1)
 redis_queue_client = _redis_config.create_client(db=1)
+
+# Synchronous client for RQ/Scheduler (uses DB 1)
+redis_queue_sync = _redis_config.create_sync_client(db=1)
 
 # Session storage client (uses DB 2)
 redis_session_client = _redis_config.create_client(db=2)
@@ -1124,6 +1137,7 @@ async def close_redis_connections():
 __all__ = [
     "redis_client",
     "redis_queue_client", 
+    "redis_queue_sync",
     "redis_session_client",
     "cache",
     "rate_limiter",

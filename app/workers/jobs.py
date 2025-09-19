@@ -24,7 +24,7 @@ from sqlalchemy import select, update, and_, or_
 from sqlalchemy.orm import selectinload
 
 from app.core.config import settings
-from app.core.cache import redis_client
+from app.core.cache import redis_client, redis_queue_sync
 from app.models.database import (
     async_session_maker, User, Organization, Report, Alert, Event,
     ReportStatus, AlertStatus, AlertChannel, EventType, UrgencyLevel,
@@ -1157,7 +1157,7 @@ def schedule_recurring_jobs():
     from rq_scheduler import Scheduler
     from datetime import time
     
-    scheduler = Scheduler(connection=redis_client.connection_pool.connection())
+    scheduler = Scheduler(connection=redis_queue_sync)
     
     # Daily cleanup at 2 AM
     scheduler.cron(

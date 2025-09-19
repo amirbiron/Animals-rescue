@@ -25,7 +25,7 @@ from rq.registry import StartedJobRegistry, FinishedJobRegistry, FailedJobRegist
 from rq_scheduler import Scheduler
 
 from app.core.config import settings
-from app.core.cache import redis_client, redis_queue_client
+from app.core.cache import redis_client, redis_queue_client, redis_queue_sync
 from app.core.exceptions import (
     WorkerError,
     QueueError,
@@ -394,7 +394,7 @@ class WorkerManager:
     async def _start_scheduler(self):
         """Start job scheduler."""
         try:
-            self.scheduler = Scheduler(connection=redis_queue_client)
+            self.scheduler = Scheduler(connection=redis_queue_sync)
             
             # Schedule recurring jobs
             schedule_recurring_jobs()
@@ -429,7 +429,7 @@ class WorkerManager:
             worker = ManagedWorker(
                 worker_id=worker_id,
                 queues=queues,
-                connection=redis_queue_client
+                connection=redis_queue_sync
             )
             
             # Start worker (blocks until stopped)
@@ -480,7 +480,7 @@ class WorkerManager:
                 # Check heartbeat
                 heartbeat_key = f"worker_heartbeat:{worker_id}"
                 try:
-                    heartbeat_data = redis_queue_client.get(heartbeat_key)
+                    heartbeat_data = redis_queue_sync.get(heartbeat_key)
                     if not heartbeat_data:
                         logger.warning(f"No heartbeat from worker {worker_id}")
                         unhealthy_workers.append(worker_id)
@@ -549,7 +549,7 @@ class WorkerManager:
         # Queue status
         queue_status = {}
         try:
-            with Connection(redis_queue_client):
+            with Connection(redis_queue_sync):
                 for queue_name in WORKER_QUEUES:
                     queue = Queue(queue_name)
                     started_registry = StartedJobRegistry(queue.name, queue.connection)
@@ -585,8 +585,8 @@ class WorkerManager:
     async def get_job_info(self, job_id: str) -> Optional[Dict[str, Any]]:
         """Get information about a specific job."""
         try:
-            with Connection(redis_queue_client):
-                job = Job.fetch(job_id, connection=redis_queue_client)
+            with Connection(redis_queue_sync):
+                job = Job.fetch(job_id, connection=redis_queue_sync)
                 
                 return {
                     'id': job.id,
