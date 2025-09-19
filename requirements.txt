@@ -99,3 +99,5 @@ pre-commit==4.0.1                    # Git hooks for code quality
 # Production Server
 # =============================================================================
 gunicorn==23.0.0                     # WSGI server for production
+
+GeoAlchemy2==0.18.0              # GIS support for PostgreSQL
