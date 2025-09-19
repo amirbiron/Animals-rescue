@@ -78,6 +78,9 @@ rich==13.9.4                         # Rich terminal output
 pendulum==3.0.0                      # Better datetime handling
 pycountry==24.6.1                    # Country/language codes
 
+# Retry utilities (used by app.services.google)
+tenacity==9.0.0
+
 
 
 # =============================================================================
