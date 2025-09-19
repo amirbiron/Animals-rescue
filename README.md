@@ -145,6 +145,41 @@
 
 ## 🚀 פריסה
 
+
+### פריסה ב־Render
+
+ב־[Render](https://render.com/) יש להקים שני שירותים עיקריים:
+
+1. **Web Service (שירות אינטרנטי)**  
+   - מיועד להרצת FastAPI (ה־API הראשי + Webhook של טלגרם).  
+   - **Build Command**:  
+     ```bash
+     pip install -r requirements.txt
+     ```  
+   - **Start Command**:  
+     ```bash
+     uvicorn app.main:app --host 0.0.0.0 --port 10000
+     ```  
+
+2. **Background Worker (וורקר ברקע)**  
+   - מיועד להריץ את ה־RQ Workers שמטפלים במשימות רקע.  
+   - **Build Command**:  
+     ```bash
+     pip install -r requirements.txt
+     ```  
+   - **Start Command**:  
+     ```bash
+     rq worker -u $REDIS_URL default alerts maintenance external
+     ```  
+
+3. **שירותי צד ג׳ מנוהלים**  
+   - מומלץ להוסיף גם **Redis** ו־**PostgreSQL** כשירותים מנוהלים ישירות מ־Render.  
+   - את פרטי ההתחברות מגדירים במשתני הסביבה:  
+     - `DATABASE_URL` למסד הנתונים  
+     - `REDIS_URL` ל־Redis  
+
+> ⚠️ הערה: ניתן להגדיר שירותי Redis/Postgres גם מחוץ ל־Render, אך הפתרון המובנה שלהם מקל על תחזוקה וסקיילינג.
+
 ### משתני סביבה לפרודקשן
 - `ENVIRONMENT=production`  
 - `DATABASE_URL`, `REDIS_URL` וכו’  
