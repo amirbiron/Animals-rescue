@@ -34,9 +34,10 @@ from app.core.i18n import get_text, detect_language
 
 logger = structlog.get_logger(__name__)
 
-# Email configuration validation
+# Email configuration validation / discoverability
+# אם SMTP לא מוגדר – נרשום שהשירות מושבת (לא אזהרה מבלבלת)
 if not all([settings.SMTP_HOST, settings.SMTP_PORT, settings.SMTP_USER]):
-    logger.warning("Email service not fully configured - some features may be disabled")
+    logger.info("Email service disabled (SMTP not configured)")
 
 
 @dataclass
@@ -449,6 +450,14 @@ class EmailService:
     
     async def test_email_connection(self) -> Dict[str, Any]:
         """Test email service configuration."""
+        # אם SMTP לא מוגדר – נחזיר סטטוס מושבת בצורה ברורה
+        if not all([settings.SMTP_HOST, settings.SMTP_PORT, settings.SMTP_USER]):
+            return {
+                "status": "disabled",
+                "reason": "SMTP not configured",
+                "smtp_host": settings.SMTP_HOST,
+                "smtp_port": settings.SMTP_PORT,
+            }
         try:
             smtp = self._get_smtp_connection()
             smtp.noop()  # Test connection

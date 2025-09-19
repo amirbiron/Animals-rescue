@@ -1,0 +1,14 @@
+{
+  "bot.start_message": "مرحبًا بكم في Animal Rescue Bot! أرسل /help للأوامر.",
+  "bot.help_message": "استخدم /new_report لإنشاء بلاغ إنقاذ جديد.",
+  "bot.error.general": "حدث خطأ. يرجى المحاولة مرة أخرى.",
+
+  "api.success": "تمت العملية بنجاح",
+  "api.error": "حدث خطأ",
+  "api.not_found": "المورد غير موجود",
+
+  "alert.new_report.subject": "بلاغ إنقاذ حيوانات جديد",
+  "alert.new_report.body": "تم استلام بلاغ إنقاذ جديد.",
+
+  "alert.status_update.subject": "تحديث الحالة: {status}"
+}
