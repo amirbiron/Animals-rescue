@@ -14,14 +14,13 @@ from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import (
     AnyHttpUrl,
-    BaseSettings,
     EmailStr,
     Field,
     PostgresDsn,
     field_validator,
     model_validator,
 )
-from pydantic_core.core_schema import ValidationInfo
+from pydantic_settings import BaseSettings
 
 # =============================================================================
 # Base Directories
