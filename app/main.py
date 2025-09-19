@@ -7,6 +7,7 @@ routing, and configuration for the Animal Rescue Bot system.
 """
 
 import asyncio
+import importlib
 import logging
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -28,8 +29,6 @@ from starlette.responses import PlainTextResponse
 
 from app.core.config import settings, setup_logging
 from app.models.database import engine, create_tables, check_database_health
-from app.api.v1.api import api_router
-from app.bot.webhook import telegram_router
 from app.core.security import get_current_user
 from app.core.exceptions import (
     AnimalRescueException,
@@ -84,6 +83,35 @@ DATABASE_QUERIES = Counter(
 # Application Lifespan Management
 # =============================================================================
 
+def _check_runtime_dependencies() -> None:
+    """
+    בדיקת תלויות קריטיות בזמן עליית השרת.
+    אם חסרות חבילות חיוניות (למשל tenacity), נזרוק שגיאה עם לוג ברור.
+    """
+    logger = structlog.get_logger(__name__)
+    required_modules = [
+        "tenacity",
+    ]
+    missing: Dict[str, str] = {}
+    for module_name in required_modules:
+        try:
+            importlib.import_module(module_name)
+        except Exception as exc:  # noqa: BLE001 - נרצה את ההודעה המקורית
+            missing[module_name] = str(exc)
+    if missing:
+        logger.error(
+            "❌ Missing required Python packages",
+            missing=list(missing.keys()),
+            details=missing,
+            fix=(
+                "Add the missing packages to requirements.txt and rebuild/redeploy. "
+                "On Render: trigger a deploy to install updated dependencies."
+            ),
+        )
+        raise RuntimeError(
+            f"Missing required Python packages: {', '.join(missing.keys())}"
+        )
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
@@ -100,6 +128,35 @@ async def lifespan(app: FastAPI):
     setup_logging()
     logger.info("📝 Logging configured", log_level=settings.LOG_LEVEL)
     
+    # בדיקת תלויות לפני כל ייבוא/אתחול שעלול לדרוש אותן
+    _check_runtime_dependencies()
+
+    # רישום ראוטרים בצורה עצלה לאחר בדיקת התלויות
+    try:
+        from app.api.v1.api import api_router
+        from app.bot.webhook import telegram_router
+        from app.admin.routes import admin_router
+
+        app.include_router(
+            api_router,
+            prefix=settings.API_V1_PREFIX,
+            tags=["API v1"],
+        )
+        app.include_router(
+            telegram_router,
+            prefix="/telegram",
+            tags=["Telegram Bot"],
+        )
+        app.include_router(
+            admin_router,
+            prefix="/admin",
+            tags=["Admin Interface"],
+        )
+        logger.info("🧭 Routers registered")
+    except Exception as e:
+        logger.error("❌ Failed to register routers", error=str(e))
+        raise
+
     # Initialize database
     try:
         await create_tables()
@@ -572,28 +629,10 @@ if static_dir.exists():
 # =============================================================================
 # API Routes
 # =============================================================================
-
-# Include API routes
-app.include_router(
-    api_router,
-    prefix=settings.API_V1_PREFIX,
-    tags=["API v1"]
-)
-
-# Include Telegram webhook
-app.include_router(
-    telegram_router,
-    prefix="/telegram",
-    tags=["Telegram Bot"]
-)
-
-# Admin interface routes
-from app.admin.routes import admin_router
-app.include_router(
-    admin_router,
-    prefix="/admin",
-    tags=["Admin Interface"]
-)
+"""
+רישום הראוטרים מועבר ל-lifespan כדי לאפשר בדיקת תלויות לפני ייבוא
+מודולים שעלולים לדרוש חבילות חיצוניות. השארנו את הכותרות כאן לשימור מבנה הקובץ.
+"""
 
 
 # =============================================================================
