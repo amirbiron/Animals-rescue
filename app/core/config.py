@@ -210,8 +210,8 @@ class Settings(BaseSettings):
     # =========================================================================
     
     # Logging configuration
-    LOG_LEVEL: str = Field(default="INFO")
-    LOG_FORMAT: Literal["json", "pretty"] = Field(default="pretty")
+    LOG_LEVEL: str = Field(default="DEBUG")
+    LOG_FORMAT: Literal["json", "pretty"] = Field(default="json")
     
     # Sentry for error tracking
     SENTRY_DSN: Optional[str] = Field(default=None, description="Sentry DSN for error tracking")
@@ -394,14 +394,26 @@ settings = get_settings()
 def setup_logging() -> None:
     """Configure structured logging for the application."""
     import structlog
-    
+
+    # Processor to ensure exc_info=True is attached when logging inside an exception block
+    def _ensure_exc_info_processor(logger, method_name, event_dict):
+        if event_dict.get("exc_info"):
+            return event_dict
+        if method_name in ("error", "exception", "critical"):
+            import sys
+            if sys.exc_info()[0] is not None:
+                event_dict["exc_info"] = True
+        return event_dict
+
     # Configure structlog
     structlog.configure(
         processors=[
             structlog.contextvars.merge_contextvars,
             structlog.stdlib.add_logger_name,
             structlog.stdlib.add_log_level,
+            _ensure_exc_info_processor,
             structlog.processors.StackInfoRenderer(),
+            structlog.processors.format_exc_info,
             structlog.processors.TimeStamper(fmt="iso"),
             (
                 structlog.dev.ConsoleRenderer()
@@ -415,13 +427,13 @@ def setup_logging() -> None:
         logger_factory=structlog.stdlib.LoggerFactory(),
         cache_logger_on_first_use=True,
     )
-    
+
     # Configure standard library logging
     logging.basicConfig(
         level=getattr(logging, settings.LOG_LEVEL.upper()),
         format="%(message)s" if settings.LOG_FORMAT == "json" else None,
     )
-    
+
     # Suppress noisy loggers in production
     if settings.is_production:
         logging.getLogger("uvicorn").setLevel(logging.WARNING)

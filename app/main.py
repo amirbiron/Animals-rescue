@@ -129,8 +129,8 @@ async def lifespan(app: FastAPI):
     logger = structlog.get_logger(__name__)
     
     # Startup
-    logger.info("🚀 Starting Animal Rescue Bot application")
-    logger.info("📝 Logging configured", log_level=settings.LOG_LEVEL)
+    logger.info("🚀 Starting Animal Rescue Bot application", version=settings.APP_VERSION, environment=settings.ENVIRONMENT)
+    logger.info("📝 Logging configured", log_level=settings.LOG_LEVEL, log_format=settings.LOG_FORMAT)
     
     # בדיקת תלויות לפני כל ייבוא/אתחול שעלול לדרוש אותן
     _check_runtime_dependencies()
