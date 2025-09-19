@@ -11,7 +11,7 @@ import uuid
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional, Union
 
-import jwt
+from jose import jwt, JWTError
 import structlog
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -102,9 +102,9 @@ def create_access_token(
         )
     
     to_encode = {
-        "exp": expire,
+        "exp": int(expire.timestamp()),
         "sub": str(subject),
-        "iat": datetime.now(timezone.utc),
+        "iat": int(datetime.now(timezone.utc).timestamp()),
         "type": "access",
     }
     
@@ -137,10 +137,10 @@ def create_telegram_auth_token(user_id: uuid.UUID, telegram_user_id: int) -> str
     expire = datetime.now(timezone.utc) + timedelta(days=30)  # Longer for bots
     
     to_encode = {
-        "exp": expire,
+        "exp": int(expire.timestamp()),
         "sub": str(user_id),
         "telegram_user_id": telegram_user_id,
-        "iat": datetime.now(timezone.utc),
+        "iat": int(datetime.now(timezone.utc).timestamp()),
         "type": "telegram",
     }
     
@@ -187,7 +187,7 @@ def decode_token(token: str) -> Dict[str, Any]:
         
         return payload
         
-    except jwt.PyJWTError as e:
+    except JWTError as e:
         logger.debug("JWT decode error", error=str(e))
         raise ValidationError("Invalid token")
     except Exception as e:
