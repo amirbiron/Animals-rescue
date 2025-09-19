@@ -354,6 +354,8 @@ class FileStorageService:
     - Duplicate detection
     """
     
+    _initialized = False
+
     def __init__(self):
         # Initialize storage backend based on configuration
         if settings.STORAGE_BACKEND == "local":
@@ -362,8 +364,9 @@ class FileStorageService:
             self.backend = S3FileStorage()
         else:
             raise ValueError(f"Unsupported storage backend: {settings.STORAGE_BACKEND}")
-        
-        logger.info("File storage service initialized", backend=settings.STORAGE_BACKEND)
+        if not FileStorageService._initialized:
+            logger.info("File storage service initialized", backend=settings.STORAGE_BACKEND)
+            FileStorageService._initialized = True
     
     def validate_file(self, file_data: bytes, filename: str, content_type: str) -> None:
         """

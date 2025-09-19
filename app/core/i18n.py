@@ -56,7 +56,8 @@ class TranslationLoader:
         translation_file = self.translations_dir / f"{language}.json"
         
         if not translation_file.exists():
-            logger.warning(
+            # Log once per language at debug level to reduce noise
+            logger.debug(
                 "Translation file not found",
                 language=language,
                 file_path=str(translation_file)
@@ -269,7 +270,8 @@ class I18nService:
                 return translation
         
         # Return key as fallback
-        logger.warning(
+        # Avoid noisy warnings on every missing key, use debug instead
+        logger.debug(
             "Translation not found",
             key=key,
             language=language,

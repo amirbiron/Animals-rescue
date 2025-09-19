@@ -548,14 +548,18 @@ class NLPService:
     - Text similarity
     """
     
+    _initialized = False
+
     def __init__(self):
+        # Prevent duplicate noisy init logs across multiple imports/workers
         self.language_detector = LanguageDetector()
         self.keyword_extractor = KeywordExtractor()
         self.urgency_detector = UrgencyDetector()
         self.animal_classifier = AnimalClassifier()
         self.sentiment_analyzer = SentimentAnalyzer()
-        
-        logger.info("NLP Service initialized")
+        if not NLPService._initialized:
+            logger.info("NLP Service initialized")
+            NLPService._initialized = True
     
     @cached(ttl=3600, namespace="nlp")
     async def analyze_text(

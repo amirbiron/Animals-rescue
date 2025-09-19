@@ -139,8 +139,8 @@ async def lifespan(app: FastAPI):
     try:
         from app.api.v1.api import api_router
         from app.bot.webhook import telegram_router
-        from app.admin.routes import admin_router
 
+        # Always include core routers
         app.include_router(
             api_router,
             prefix=settings.API_V1_PREFIX,
@@ -151,14 +151,21 @@ async def lifespan(app: FastAPI):
             prefix="/telegram",
             tags=["Telegram Bot"],
         )
-        app.include_router(
-            admin_router,
-            prefix="/admin",
-            tags=["Admin Interface"],
-        )
-        logger.info("🧭 Routers registered")
+
+        # Try to include admin router if available (optional)
+        try:
+            from admin.routes import admin_router  # Top-level "admin" package
+            app.include_router(
+                admin_router,
+                prefix="/admin",
+                tags=["Admin Interface"],
+            )
+            logger.info("🧭 Routers registered (with admin)")
+        except ModuleNotFoundError as exc:
+            logger.warning("⚠️ Admin module missing - skipping admin routes", error=str(exc))
+            logger.info("🧭 Routers registered (without admin)")
     except Exception as e:
-        logger.error("❌ Failed to register routers", error=str(e), exc_info=True)
+        logger.error("❌ Failed to register core routers", error=str(e), exc_info=True)
         raise
 
     # Initialize database
@@ -210,7 +217,7 @@ async def lifespan(app: FastAPI):
     # Initialize Telegram bot
     if not settings.is_testing:
         try:
-            from app.bot.bot import bot, initialize_bot
+            from app.bot.handlers import bot, initialize_bot
             await initialize_bot()
             logger.info("🤖 Telegram bot initialized")
         except Exception as e:
@@ -562,7 +569,7 @@ async def health_check():
     # Check Telegram bot
     if not settings.is_testing:
         try:
-            from app.bot.bot import bot
+            from app.bot.handlers import bot
             bot_info = await bot.get_me()
             health_data["services"]["telegram_bot"] = {
                 "status": "healthy",
