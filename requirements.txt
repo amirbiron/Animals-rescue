@@ -57,13 +57,13 @@ cryptography==44.0.0                 # Cryptographic functions
 # =============================================================================
 # Email & Communications
 # =============================================================================
-emails>=0.6,<0.7                        # Email sending
+emails>=0.6                          # Email sending
 jinja2==3.1.4                        # Email templates
 
 # =============================================================================
 # Monitoring & Logging
 # =============================================================================
-structlog==24.5.0                    # Structured logging
+structlog==24.4.0                    # Structured logging
 sentry-sdk[fastapi]==2.21.0          # Error tracking
 prometheus-client==0.22.0            # Metrics collection
 opentelemetry-api==1.31.0            # Observability
