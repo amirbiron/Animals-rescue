@@ -46,7 +46,7 @@ python-multipart==0.0.20             # File uploads support
 # NLP & Text Processing
 # =============================================================================
 spacy==3.8.2                         # Basic NLP for text classification
-he-core-news-sm @ https://github.com/explosion/spacy-models/releases/download/he_core_news_sm-3.7.0/he_core_news_sm-3.7.0-py3-none-any.whl
+spacy>=3.7.0
 
 # =============================================================================
 # Authentication & Security
