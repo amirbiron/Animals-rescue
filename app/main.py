@@ -91,6 +91,10 @@ def _check_runtime_dependencies() -> None:
     logger = structlog.get_logger(__name__)
     required_modules = [
         "tenacity",
+        "httpx",
+        "redis",
+        "rq",
+        "telegram",
     ]
     missing: Dict[str, str] = {}
     for module_name in required_modules:
