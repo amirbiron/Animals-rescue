@@ -1,0 +1,14 @@
+{
+  "bot.start_message": "ברוכים הבאים ל‑Animal Rescue Bot! לשליחת פקודות /help.",
+  "bot.help_message": "השתמשו ב‑/new_report כדי ליצור דיווח הצלה חדש.",
+  "bot.error.general": "אירעה שגיאה. נסו שוב.",
+
+  "api.success": "הפעולה הושלמה בהצלחה",
+  "api.error": "אירעה שגיאה",
+  "api.not_found": "המשאב לא נמצא",
+
+  "alert.new_report.subject": "דיווח הצלת בעלי חיים חדש",
+  "alert.new_report.body": "התקבל דיווח הצלה חדש.",
+
+  "alert.status_update.subject": "עדכון סטטוס: {status}"
+}

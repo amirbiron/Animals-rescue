@@ -369,7 +369,8 @@ async def get_system_health(current_user: User = Depends(require_admin)):
         try:
             email_status = await email_service.test_email_connection()
             external_services["email"] = email_status
-            if email_status["status"] != "healthy":
+            # אל תסמן 'disabled' כאזהרה – זה מצב מקובל ללא SMTP
+            if email_status.get("status") not in ("healthy", "disabled"):
                 if health_status == "healthy":
                     health_status = "warning"
                 issues.append("Email service issues")
