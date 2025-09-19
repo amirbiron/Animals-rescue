@@ -19,6 +19,11 @@ from typing import Tuple
 from functools import wraps
 
 import redis.asyncio as redis
+from redis.exceptions import (
+    BusyLoadingError,
+    ConnectionError as RedisConnectionError,
+    TimeoutError as RedisTimeoutError,
+)
 import structlog
 from redis.retry import Retry
 from redis.backoff import ExponentialBackoff
@@ -58,9 +63,9 @@ class RedisConfig:
             "health_check_interval": 30,
             "max_connections": self.max_connections,
             "retry_on_error": [
-                redis.exceptions.BusyLoadingError,
-                redis.exceptions.ConnectionError,
-                redis.exceptions.TimeoutError,
+                BusyLoadingError,
+                RedisConnectionError,
+                RedisTimeoutError,
             ],
             "retry": Retry(
                 backoff=ExponentialBackoff(),
