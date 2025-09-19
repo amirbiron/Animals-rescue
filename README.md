@@ -243,6 +243,46 @@
 - Discussions בקהילה  
 
 ## ❗ פתרון בעיות נפוצות
+## 🧩 בדיקת תלויות בזמן עלייה (Startup Self-check)
+
+האפליקציה מבצעת בדיקת תלויות בתחילת ה־startup כדי לעצור מוקדם עם הודעה ברורה אם חסרה חבילה קריטית.
+
+- **איפה זה נמצא**: `app/main.py`, פונקציה `_check_runtime_dependencies`
+- **מה נבדק כרגע**: `tenacity`, `httpx`, `redis`, `rq`, `telegram` (ניתן להרחיב בהמשך)
+- **מה קורה אם חסר**: עולה שגיאה עם לוג ברור שמפרט אילו חבילות חסרות ומה לעשות
+
+דוגמת לוג לשגיאה:
+```text
+❌ Missing required Python packages missing=['tenacity']
+fix="Add the missing packages to requirements.txt and rebuild/redeploy. On Render: trigger a deploy to install updated dependencies."
+```
+
+### איך מתקנים בפרודקשן (Render)
+- ודאו שהחבילה מופיעה ב־`requirements.txt` (למשל: `tenacity==9.0.0`).
+- בצעו Commit + Push.
+- ב־Render: בצעו Redeploy. מומלץ "Manual Deploy → Clear build cache & deploy" כדי להבטיח התקנה נקייה.
+- ה־Build מריץ `pip install -r requirements.txt`, ואז השרת יעלה ללא השגיאה.
+
+### איך מתקנים בסביבה מקומית
+הימנעו מהתקנות גלובליות (PEP 668). עבדו בתוך venv:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+python -c "import tenacity; print(tenacity.__version__)"
+```
+
+טיפים:
+- אם יצירת venv נכשלת בגלל ensurepip, התקינו את חבילת המערכת המתאימה (בדביאן/אובונטו):
+  ```bash
+  sudo apt-get update && sudo apt-get install -y python3-venv
+  ```
+- אם נתקלתם ב־PEP 668: אל תשתמשו ב־`--break-system-packages`; עבדו בתוך venv.
+
+### הרחבת הבדיקה
+כדי להוסיף חבילות נוספות לבדיקה, הרחיבו את הרשימה ב־`_check_runtime_dependencies` (למשל: `"googlemaps"`, `"httpx"`, `"redis"`).
+הרישום של הראוטרים מתבצע אחרי הבדיקה, כך שחבילות חסרות יזוהו מוקדם עם הודעה ידידותית.
 - בעיות DB: בדיקת PostgreSQL ורצת PSQL  
 - Redis: `redis-cli ping`  
 - Webhook של טלגרם: `getWebhookInfo` או `setWebhook`  
