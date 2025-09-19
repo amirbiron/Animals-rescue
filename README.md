@@ -144,7 +144,22 @@
 - ניטור ביצועים  
 
 ## 🚀 פריסה
+4. **בוט טלגרם (Telegram Bot)**
+   - יש להגדיר את משתני הסביבה הבאים:
+     - `TELEGRAM_BOT_TOKEN` – הטוקן שקיבלת מ־[BotFather](https://t.me/BotFather).
+     - `WEBHOOK_HOST` – הדומיין הציבורי של השירות ב־Render (למשל `https://animal-rescue.onrender.com`).
+     - `TELEGRAM_WEBHOOK_SECRET` – מחרוזת סודית לאימות בקשות webhook (מומלץ להגדיר ידנית).
 
+   - לאחר הפריסה יש להריץ פקודה לקביעת ה־webhook:
+     ```bash
+     curl -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/setWebhook" \
+          -d "url=$WEBHOOK_HOST/telegram/webhook?secret_token=$TELEGRAM_WEBHOOK_SECRET"
+     ```
+
+   - לבדיקה:
+     ```bash
+     curl "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/getWebhookInfo"
+     ```
 
 ### פריסה ב־Render
 
