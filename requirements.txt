@@ -74,7 +74,7 @@ opentelemetry-sdk==1.31.0            # Observability implementation
 # =============================================================================
 python-dotenv==1.0.1                 # Environment variables
 typer==0.15.1                        # CLI commands
-rich==13.9.5                         # Rich terminal output
+rich==13.9.4                         # Rich terminal output
 pendulum==3.0.0                      # Better datetime handling
 pycountry==24.6.1                    # Country/language codes
 
