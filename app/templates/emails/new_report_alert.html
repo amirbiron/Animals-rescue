@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="{{ language }}" dir="{{ 'rtl' if language in ['he','ar'] else 'ltr' }}">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="x-ua-compatible" content="ie=edge">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ 'alert.new_report.subject' | translate(language=language) }}</title>
+  <style>
+    body { margin:0; padding:0; background:#f6f8fb; color:#222; font-family: Arial, Helvetica, sans-serif; }
+    .wrapper { max-width: 640px; margin: 0 auto; padding: 24px; }
+    .card { background: #ffffff; border-radius: 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); overflow: hidden; }
+    .header { padding: 18px 20px; background: #0a7cff; color: #fff; }
+    .app-name { font-size: 16px; opacity: 0.95; margin: 0; }
+    .title { font-size: 20px; font-weight: bold; margin: 6px 0 0 0; }
+    .urgent { background: #ff3b30; color: #fff; padding: 8px 12px; font-weight: bold; display: inline-block; border-radius: 6px; margin-top: 10px; }
+    .content { padding: 20px; line-height: 1.6; }
+    .section-title { font-size: 16px; font-weight: bold; margin: 18px 0 8px; }
+    .meta { background: #f3f5f9; border-radius: 8px; padding: 12px 14px; }
+    .meta-item { margin: 6px 0; }
+    .description { white-space: pre-wrap; background: #fafbfd; border-radius: 8px; padding: 14px; border: 1px solid #eef1f6; }
+    .btn { display: inline-block; text-decoration: none; color: #ffffff; background: #0a7cff; padding: 10px 16px; border-radius: 8px; margin-top: 14px; }
+    .footer { color: #556; font-size: 12px; margin-top: 18px; padding: 0 20px 20px; }
+  </style>
+  {% set dir = 'rtl' if language in ['he','ar'] else 'ltr' %}
+</head>
+<body>
+  <div class="wrapper">
+    <div class="card">
+      <div class="header">
+        <p class="app-name">{{ app_name }}</p>
+        <div class="title">{{ 'alert.new_report.subject' | translate(language=language) }}</div>
+        {% if urgent %}<div class="urgent">⚠️ {{ 'bot.report.urgency_select' | translate(language=language) }}: {{ report.urgency_level or 'critical' }}</div>{% endif %}
+      </div>
+      <div class="content">
+        {% if organization_name %}
+          <div class="section-title">{{ organization_name }}</div>
+        {% endif %}
+
+        <div class="meta">
+          {% if report.public_id %}
+            <div class="meta-item">ID: {{ report.public_id }}</div>
+          {% endif %}
+          {% if report.title %}
+            <div class="meta-item">{{ 'api.report.created' | translate(language=language) }}: {{ report.title }}</div>
+          {% endif %}
+          {% if report.animal_type %}
+            <div class="meta-item">{{ 'bot.report.animal_type_select' | translate(language=language) }}: {{ report.animal_type }}</div>
+          {% endif %}
+          {% if report.urgency_level %}
+            <div class="meta-item">{{ 'bot.report.urgency_select' | translate(language=language) }}: {{ report.urgency_level }}</div>
+          {% endif %}
+          {% if report.location and report.location.address %}
+            <div class="meta-item">{{ 'bot.report.location_request' | translate(language=language) }}: {{ report.location.address }}</div>
+          {% elif report.address %}
+            <div class="meta-item">{{ 'bot.report.location_request' | translate(language=language) }}: {{ report.address }}</div>
+          {% endif %}
+          {% if report.created_at %}
+            <div class="meta-item">{{ 'api.success' | translate(language=language) }}: {{ report.created_at | format_datetime('%Y-%m-%d %H:%M') }}</div>
+          {% endif %}
+          {% if report.reporter_name %}
+            <div class="meta-item">{{ 'bot.status.user_reports' | translate(language=language) }}: {{ report.reporter_name }}</div>
+          {% endif %}
+        </div>
+
+        {% if report.description %}
+          <div class="section-title">{{ 'bot.report.description_request' | translate(language=language) }}</div>
+          <div class="description">{{ report.description }}</div>
+        {% endif %}
+
+        <a class="btn" href="{{ base_url }}" target="_blank" rel="noopener noreferrer">
+          {{ 'api.success' | translate(language=language) }}
+        </a>
+      </div>
+      <div class="footer">
+        <div>{{ app_name }} — {{ support_email }}</div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
+
