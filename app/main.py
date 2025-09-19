@@ -95,6 +95,7 @@ def _check_runtime_dependencies() -> None:
         "redis",
         "rq",
         "telegram",
+        "aiofiles",  # used by app.services.email
     ]
     missing: Dict[str, str] = {}
     for module_name in required_modules:
@@ -158,7 +159,7 @@ async def lifespan(app: FastAPI):
         )
         logger.info("🧭 Routers registered")
     except Exception as e:
-        logger.error("❌ Failed to register routers", error=str(e))
+        logger.error("❌ Failed to register routers", error=str(e), exc_info=True)
         raise
 
     # Initialize database
