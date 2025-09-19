@@ -32,7 +32,6 @@ rq-scheduler==0.14.0                 # Scheduled jobs for RQ
 # =============================================================================
 # HTTP Client & External APIs
 # =============================================================================
-httpx==0.28.1                        # Async HTTP client for APIs
 googlemaps==4.10.0                   # Google Maps/Places API client
 
 # =============================================================================
@@ -78,21 +77,7 @@ rich==13.9.4                         # Rich terminal output
 pendulum==3.0.0                      # Better datetime handling
 pycountry==24.6.1                    # Country/language codes
 
-# =============================================================================
-# Development & Testing (should be in requirements-dev.txt in production)
-# =============================================================================
-pytest==8.3.4                        # Testing framework
-pytest-asyncio==0.25.0               # Async testing
-pytest-httpx==0.34.0                 # HTTP mocking for tests
-factory-boy==3.3.1                   # Test data generation
-faker==33.2.0                        # Fake data generation
 
-# =============================================================================
-# Code Quality
-# =============================================================================
-ruff==0.13.1                         # Fast linter and formatter
-mypy==1.14.0                         # Type checking
-pre-commit==4.0.1                    # Git hooks for code quality
 
 # =============================================================================
 # Production Server
