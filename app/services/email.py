@@ -547,4 +547,30 @@ async def test_email_service() -> Dict[str, Any]:
 
 # Cleanup on module unload
 import atexit
-atexit.register(lambda: asyncio.create_task(email_service.close()))
+
+
+def _close_email_service_on_exit():
+    """Close EmailService safely at interpreter exit.
+    Avoid using create_task when no running loop exists.
+    """
+    try:
+        loop = asyncio.get_running_loop()
+        if getattr(loop, "is_running", lambda: False)():
+            try:
+                loop.create_task(email_service.close())
+            except Exception:
+                pass
+        else:
+            try:
+                asyncio.run(email_service.close())
+            except Exception:
+                pass
+    except RuntimeError:
+        # No running loop
+        try:
+            asyncio.run(email_service.close())
+        except Exception:
+            pass
+
+
+atexit.register(_close_email_service_on_exit)

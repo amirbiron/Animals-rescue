@@ -55,7 +55,7 @@ telegram_alerts = TelegramAlertsService()
 # Report Processing Jobs
 # =============================================================================
 
-@job("default", timeout="10m", retry=Retry(max=3, interval=60))
+@job("default", timeout="10m", retry=Retry(max=3, interval=60), connection=redis_queue_sync)
 def process_new_report(report_id: str) -> Dict[str, Any]:
     """
     Process a newly submitted report.
@@ -422,7 +422,7 @@ def _calculate_distance_km(lat1: float, lon1: float, lat2: float, lon2: float) -
 # Alert and Notification Jobs
 # =============================================================================
 
-@job("alerts", timeout="5m", retry=Retry(max=3, interval=30))
+@job("alerts", timeout="5m", retry=Retry(max=3, interval=30), connection=redis_queue_sync)
 def send_organization_alert(
     report_id: str, organization_id: str, channel: str
 ) -> Dict[str, Any]:
@@ -676,7 +676,7 @@ async def _generate_alert_message(
     }
 
 
-@job("alerts", timeout="2m", retry=Retry(max=2, interval=60))
+@job("alerts", timeout="2m", retry=Retry(max=2, interval=60), connection=redis_queue_sync)
 def retry_failed_alerts() -> Dict[str, int]:
     """Retry failed alerts that are eligible for retry."""
     logger.info("Retrying failed alerts")
@@ -735,7 +735,7 @@ async def _retry_failed_alerts_async() -> Dict[str, int]:
 # Cleanup and Maintenance Jobs
 # =============================================================================
 
-@job("maintenance", timeout="30m")
+@job("maintenance", timeout="30m", connection=redis_queue_sync)
 def cleanup_old_data() -> Dict[str, int]:
     """Clean up old data according to retention policies."""
     logger.info("Starting data cleanup")
@@ -834,7 +834,7 @@ async def _cleanup_old_data_async() -> Dict[str, int]:
     return results
 
 
-@job("maintenance", timeout="10m")
+@job("maintenance", timeout="10m", connection=redis_queue_sync)
 def update_organization_stats() -> Dict[str, int]:
     """Update organization response statistics."""
     logger.info("Updating organization statistics")
@@ -915,7 +915,7 @@ async def _update_organization_stats_async() -> Dict[str, int]:
 # External API Integration Jobs
 # =============================================================================
 
-@job("external", timeout="15m", retry=Retry(max=2, interval=300))
+@job("external", timeout="15m", retry=Retry(max=2, interval=300), connection=redis_queue_sync)
 def sync_google_places_data() -> Dict[str, Any]:
     """Synchronize organization data with Google Places API."""
     logger.info("Starting Google Places data sync")
@@ -1031,7 +1031,7 @@ async def _sync_google_places_data_async() -> Dict[str, Any]:
 # Testing and Development Jobs
 # =============================================================================
 
-@job("default", timeout="1m")
+@job("default", timeout="1m", connection=redis_queue_sync)
 def send_test_alert(message: str = "Test alert from Animal Rescue Bot") -> Dict[str, str]:
     """Send a test alert for development and monitoring."""
     logger.info("Sending test alert", message=message)
@@ -1046,7 +1046,7 @@ def send_test_alert(message: str = "Test alert from Animal Rescue Bot") -> Dict[
     }
 
 
-@job("maintenance", timeout="5m")
+@job("maintenance", timeout="5m", connection=redis_queue_sync)
 def generate_daily_statistics() -> Dict[str, Any]:
     """Generate daily statistics for monitoring and reporting."""
     logger.info("Generating daily statistics")
