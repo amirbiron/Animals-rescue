@@ -16,7 +16,6 @@ from pydantic import (
     AnyHttpUrl,
     EmailStr,
     Field,
-    PostgresDsn,
     field_validator,
     model_validator,
 )
@@ -85,19 +84,12 @@ class Settings(BaseSettings):
     DATABASE_ECHO: bool = Field(default=False, description="Echo SQL queries")
     
     # Computed database URL (will be set by model_validator)
-    DATABASE_URL: Optional[PostgresDsn] = None
+    DATABASE_URL: Optional[str] = None
     
     @model_validator(mode='after')
     def assemble_database_url(self) -> 'Settings':
-        """Construct the database URL from components."""
-        self.DATABASE_URL = PostgresDsn.build(
-            scheme="postgresql+asyncpg",
-            username=self.POSTGRES_USER,
-            password=self.POSTGRES_PASSWORD,
-            host=self.POSTGRES_HOST,
-            port=self.POSTGRES_PORT,
-            path=self.POSTGRES_DB,
-        )
+        url = f"postgresql+asyncpg://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}@{self.POSTGRES_HOST}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
+        object.__setattr__(self, "DATABASE_URL", url)
         return self
     
     # =========================================================================
