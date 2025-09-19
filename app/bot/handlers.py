@@ -46,7 +46,7 @@ from app.models.database import AnimalType, UrgencyLevel, ReportStatus, UserRole
 from app.services.nlp import NLPService
 from app.services.geocoding import GeocodingService
 from app.services.file_storage import FileStorageService
-from app.workers.jobs import process_new_report, send_alerts_for_report
+from app.workers.jobs import process_new_report
 from app.core.i18n import get_text, detect_language, set_user_language
 
 # =============================================================================
@@ -888,7 +888,6 @@ async def submit_report(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
         
         # Queue background jobs
         process_new_report.delay(str(report.id))
-        send_alerts_for_report.delay(str(report.id))
         
         # Success message
         success_text = get_text("report_submitted_success", lang).format(
