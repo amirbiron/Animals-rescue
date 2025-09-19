@@ -90,7 +90,7 @@ faker==33.2.0                        # Fake data generation
 # =============================================================================
 # Code Quality
 # =============================================================================
-ruff==0.8.16                         # Fast linter and formatter
+ruff==0.13.1                         # Fast linter and formatter
 mypy==1.14.0                         # Type checking
 pre-commit==4.0.1                    # Git hooks for code quality
 
