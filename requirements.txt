@@ -49,7 +49,8 @@ spacy==3.8.2                         # Basic NLP for text classification
 # =============================================================================
 # Authentication & Security
 # =============================================================================
-python-jose[cryptography]==3.3.0     # JWT tokens
+python-jose[cryptography]==3.3.0     # JWT tokens (used elsewhere if needed)
+PyJWT==2.9.0                         # JWT lib for app.core.security
 passlib[bcrypt]==1.7.4               # Password hashing
 cryptography==44.0.0                 # Cryptographic functions
 
