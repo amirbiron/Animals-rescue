@@ -85,3 +85,5 @@ pycountry==24.6.1                    # Country/language codes
 gunicorn==23.0.0                     # WSGI server for production
 
 GeoAlchemy2==0.18.0              # GIS support for PostgreSQL
+itsdangerous==2.2.0
+
