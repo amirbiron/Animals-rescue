@@ -15,12 +15,13 @@ import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional, Union, Callable
+from typing import Tuple
 from functools import wraps
 
 import redis.asyncio as redis
 import structlog
-from redis.asyncio.retry import Retry
-from redis.asyncio.backoff import ExponentialBackoff
+from redis.retry import Retry
+from redis.backoff import ExponentialBackoff
 
 from app.core.config import settings
 from app.core.exceptions import RateLimitError
