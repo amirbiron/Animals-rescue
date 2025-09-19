@@ -62,7 +62,7 @@ class ReportCreateRequest(BaseModel):
     animal_type: AnimalType
     urgency_level: UrgencyLevel
     location: LocationModel
-    language: str = Field(default="he", regex="^(he|ar|en)$")
+    language: str = Field(default="he", pattern="^(he|ar|en)$")
     
     @validator("description")
     def validate_description(cls, v):
@@ -174,7 +174,7 @@ class ReportSearchParams(BaseModel):
     urgency_level: Optional[UrgencyLevel] = None
     status: Optional[ReportStatus] = None
     city: Optional[str] = Field(None, max_length=100)
-    language: Optional[str] = Field(None, regex="^(he|ar|en)$")
+    language: Optional[str] = Field(None, pattern="^(he|ar|en)$")
     date_from: Optional[datetime] = None
     date_to: Optional[datetime] = None
     latitude: Optional[float] = Field(None, ge=-90, le=90)
@@ -182,8 +182,8 @@ class ReportSearchParams(BaseModel):
     radius_km: Optional[float] = Field(None, ge=1, le=100)
     
     # Sorting
-    sort_by: str = Field(default="created_at", regex="^(created_at|urgency_level|status|city)$")
-    sort_order: str = Field(default="desc", regex="^(asc|desc)$")
+    sort_by: str = Field(default="created_at", pattern="^(created_at|urgency_level|status|city)$")
+    sort_order: str = Field(default="desc", pattern="^(asc|desc)$")
     
     # Pagination
     page: int = Field(default=1, ge=1)
