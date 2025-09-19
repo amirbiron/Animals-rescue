@@ -1,0 +1,10 @@
+{
+  "bot.start_message": "Welcome to Animal Rescue Bot! Send /help for commands.",
+  "bot.help_message": "Use /new_report to create a new rescue report.",
+  "bot.error.general": "An error occurred. Please try again.",
+  "api.success": "Operation completed successfully",
+  "api.error": "An error occurred",
+  "api.not_found": "Resource not found",
+  "alert.new_report.subject": "New Animal Rescue Report",
+  "alert.new_report.body": "A new animal rescue report has been submitted."
+}
