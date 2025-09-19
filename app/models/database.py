@@ -28,6 +28,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.ext.asyncio import AsyncAttrs, AsyncSession, async_sessionmaker, create_async_engine
@@ -36,7 +37,7 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from app.core.config import settings
 import structlog
 
-logger = structlog.get_logger(__name__)
+logger = structlog.get_logger(__name__).bind(component="database")
 
 # =============================================================================
 # Enums for Type Safety
@@ -1259,7 +1260,7 @@ async def wait_for_database(
         try:
             async with async_session_maker() as session:
                 # Lightweight connectivity check
-                await session.execute("SELECT 1")
+                await session.execute(text("SELECT 1"))
             if attempt > 0:
                 logger.info(
                     "Database became available",
@@ -1348,16 +1349,16 @@ async def check_database_health() -> Dict[str, Any]:
     try:
         async with async_session_maker() as session:
             # Test basic connectivity
-            result = await session.execute("SELECT 1 as test")
+            result = await session.execute(text("SELECT 1 as test"))
             test_value = result.scalar()
             
             # Test table access
-            user_count = await session.execute("SELECT COUNT(*) FROM users")
+            user_count = await session.execute(text("SELECT COUNT(*) FROM users"))
             users_total = user_count.scalar()
             
             # Test recent activity
             recent_reports = await session.execute(
-                "SELECT COUNT(*) FROM reports WHERE created_at > NOW() - INTERVAL '24 hours'"
+                text("SELECT COUNT(*) FROM reports WHERE created_at > NOW() - INTERVAL '24 hours'")
             )
             reports_today = recent_reports.scalar()
             

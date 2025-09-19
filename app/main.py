@@ -126,6 +126,12 @@ async def lifespan(app: FastAPI):
     """
     # Setup logging early before any logger usage
     setup_logging()
+    # Bind global context to all logs
+    structlog.contextvars.bind_contextvars(
+        app=settings.APP_NAME,
+        environment=settings.ENVIRONMENT,
+        version=settings.APP_VERSION,
+    )
     logger = structlog.get_logger(__name__)
     
     # Startup
