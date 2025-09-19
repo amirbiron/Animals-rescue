@@ -46,7 +46,6 @@ python-multipart==0.0.20             # File uploads support
 # NLP & Text Processing
 # =============================================================================
 spacy==3.8.2                         # Basic NLP for text classification
-spacy>=3.7.0
 
 # =============================================================================
 # Authentication & Security
