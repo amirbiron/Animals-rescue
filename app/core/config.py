@@ -394,6 +394,7 @@ settings = get_settings()
 def setup_logging() -> None:
     """Configure structured logging for the application."""
     import structlog
+    import re
 
     # Processor to ensure exc_info=True is attached when logging inside an exception block
     def _ensure_exc_info_processor(logger, method_name, event_dict):
@@ -405,6 +406,28 @@ def setup_logging() -> None:
                 event_dict["exc_info"] = True
         return event_dict
 
+    # Secret redaction filter
+    SENSITIVE_KEYS = {"authorization", "token", "api_key", "password", "secret", "dsn"}
+    token_pattern = re.compile(r"(bot\d+:[A-Za-z0-9_-]{20,}|ghp_[A-Za-z0-9]{20,}|ya29\.[A-Za-z0-9._-]+|AIza[0-9A-Za-z_-]{35}|sk-[A-Za-z0-9]{20,})")
+
+    def redact_secrets(_, __, event_dict):
+        # Redact obvious tokens in string fields
+        for key, value in list(event_dict.items()):
+            try:
+                if isinstance(value, str):
+                    event_dict[key] = token_pattern.sub("***REDACTED***", value)
+                elif isinstance(value, dict):
+                    for k in list(value.keys()):
+                        if k and k.lower() in SENSITIVE_KEYS:
+                            value[k] = "***REDACTED***"
+            except Exception:
+                pass
+        # Explicitly redact configured sensitive settings
+        for sensitive in ("TELEGRAM_BOT_TOKEN", "SECRET_KEY", "POSTGRES_PASSWORD", "REDIS_PASSWORD", "SENTRY_DSN", "S3_SECRET_ACCESS_KEY"):
+            if sensitive in event_dict:
+                event_dict[sensitive] = "***REDACTED***"
+        return event_dict
+
     # Configure structlog
     structlog.configure(
         processors=[
@@ -412,6 +435,7 @@ def setup_logging() -> None:
             structlog.stdlib.add_logger_name,
             structlog.stdlib.add_log_level,
             _ensure_exc_info_processor,
+            redact_secrets,
             structlog.processors.StackInfoRenderer(),
             structlog.processors.format_exc_info,
             structlog.processors.TimeStamper(fmt="iso"),
@@ -433,6 +457,19 @@ def setup_logging() -> None:
         level=getattr(logging, settings.LOG_LEVEL.upper()),
         format="%(message)s" if settings.LOG_FORMAT == "json" else None,
     )
+
+    # Attach redaction filter to standard logging to catch third-party logs
+    class _StdlibRedactFilter(logging.Filter):
+        def filter(self, record: logging.LogRecord) -> bool:
+            try:
+                if isinstance(record.msg, str):
+                    record.msg = token_pattern.sub("***REDACTED***", record.msg)
+            except Exception:
+                pass
+            return True
+
+    root_logger = logging.getLogger()
+    root_logger.addFilter(_StdlibRedactFilter())
 
     # Suppress noisy loggers in production
     if settings.is_production:
