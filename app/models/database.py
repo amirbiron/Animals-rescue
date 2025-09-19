@@ -8,6 +8,7 @@ GIS operations.
 """
 
 import enum
+import asyncio
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
@@ -33,6 +34,9 @@ from sqlalchemy.ext.asyncio import AsyncAttrs, AsyncSession, async_sessionmaker,
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 from app.core.config import settings
+import structlog
+
+logger = structlog.get_logger(__name__)
 
 # =============================================================================
 # Enums for Type Safety
@@ -1236,6 +1240,51 @@ async def create_tables() -> None:
     """Create all database tables."""
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+
+
+async def wait_for_database(
+    max_attempts: int = 10,
+    initial_delay_seconds: float = 0.5,
+    max_delay_seconds: float = 5.0,
+) -> None:
+    """Wait for database to become available with exponential backoff.
+
+    Raises last exception if database is not reachable after all attempts.
+    """
+    attempt = 0
+    delay = float(initial_delay_seconds)
+    last_error: Optional[Exception] = None
+
+    while attempt < max_attempts:
+        try:
+            async with async_session_maker() as session:
+                # Lightweight connectivity check
+                await session.execute("SELECT 1")
+            if attempt > 0:
+                logger.info(
+                    "Database became available",
+                    attempts=attempt + 1,
+                )
+            return
+        except Exception as exc:  # noqa: BLE001 - we want original error
+            last_error = exc
+            logger.warning(
+                "Database not reachable yet",
+                attempt=attempt + 1,
+                delay_seconds=delay,
+                error=str(exc),
+            )
+            await asyncio.sleep(delay)
+            delay = min(max_delay_seconds, delay * 2)
+            attempt += 1
+
+    logger.error(
+        "Database not reachable after retries",
+        attempts=max_attempts,
+        error=str(last_error) if last_error else None,
+    )
+    if last_error:
+        raise last_error
 
 
 async def drop_tables() -> None:
