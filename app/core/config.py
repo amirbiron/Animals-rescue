@@ -394,10 +394,9 @@ settings = get_settings()
 def setup_logging() -> None:
     """Configure structured logging for the application."""
     import structlog
-    from structlog import configure, get_logger
     
     # Configure structlog
-    configure(
+    structlog.configure(
         processors=[
             structlog.contextvars.merge_contextvars,
             structlog.stdlib.add_logger_name,
@@ -413,7 +412,7 @@ def setup_logging() -> None:
         wrapper_class=structlog.make_filtering_bound_logger(
             getattr(logging, settings.LOG_LEVEL.upper())
         ),
-        logger_factory=structlog.PrintLoggerFactory(),
+        logger_factory=structlog.stdlib.LoggerFactory(),
         cache_logger_on_first_use=True,
     )
     

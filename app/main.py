@@ -124,13 +124,12 @@ async def lifespan(app: FastAPI):
     
     Handles startup and shutdown events for proper resource management.
     """
+    # Setup logging early before any logger usage
+    setup_logging()
     logger = structlog.get_logger(__name__)
     
     # Startup
     logger.info("🚀 Starting Animal Rescue Bot application")
-    
-    # Setup logging
-    setup_logging()
     logger.info("📝 Logging configured", log_level=settings.LOG_LEVEL)
     
     # בדיקת תלויות לפני כל ייבוא/אתחול שעלול לדרוש אותן
