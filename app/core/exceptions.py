@@ -39,6 +39,10 @@ class APIException(AnimalRescueException, HTTPException):
         AnimalRescueException.__init__(self, message, error_code, details)
         HTTPException.__init__(self, status_code, message, headers)
 
+# RateLimitExceededError
+class RateLimitError(AnimalRescueException):
+    """Base exception for rate limiting errors."""
+    pass
 
 class ValidationError(APIException):
     """Raised when data validation fails."""
