@@ -33,7 +33,7 @@ from app.core.exceptions import (
     PermissionDeniedError,
     ValidationError
 )
-from app.models.databas import (
+from app.models.database import (
     get_db_session,
     User, Organization, Report, Alert, Event,
     UserRole, ReportStatus, UrgencyLevel, AlertStatus

@@ -28,7 +28,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from starlette.responses import PlainTextResponse
 
 from app.core.config import settings, setup_logging
-from app.models.database import engine, create_tables, check_database_health
+from app.models.database import engine, create_tables, check_database_health, wait_for_database
 from app.core.security import get_current_user
 from app.core.exceptions import (
     AnimalRescueException,
@@ -170,6 +170,8 @@ async def lifespan(app: FastAPI):
 
     # Initialize database
     try:
+        # Wait for DB to be ready (useful in container orchestration)
+        await wait_for_database()
         await create_tables()
         logger.info("🗄️ Database tables initialized")
         

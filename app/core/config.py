@@ -88,7 +88,19 @@ class Settings(BaseSettings):
     
     @model_validator(mode='after')
     def assemble_database_url(self) -> 'Settings':
-        url = f"postgresql+asyncpg://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}@{self.POSTGRES_HOST}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
+        # Respect explicit DATABASE_URL from environment if provided
+        url = self.DATABASE_URL
+        if not url:
+            url = (
+                f"postgresql+asyncpg://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}"
+                f"@{self.POSTGRES_HOST}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
+            )
+        # Normalize common URL schemes to SQLAlchemy async driver
+        if isinstance(url, str):
+            if url.startswith("postgres://"):
+                url = url.replace("postgres://", "postgresql+asyncpg://", 1)
+            elif url.startswith("postgresql://"):
+                url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
         object.__setattr__(self, "DATABASE_URL", url)
         return self
     
@@ -462,8 +474,26 @@ def setup_logging() -> None:
     class _StdlibRedactFilter(logging.Filter):
         def filter(self, record: logging.LogRecord) -> bool:
             try:
+                # Redact in main message
                 if isinstance(record.msg, str):
                     record.msg = token_pattern.sub("***REDACTED***", record.msg)
+                # Redact in args (when message uses formatting)
+                if record.args:
+                    if isinstance(record.args, dict):
+                        for k, v in list(record.args.items()):
+                            if isinstance(v, str):
+                                record.args[k] = token_pattern.sub("***REDACTED***", v)
+                    elif isinstance(record.args, tuple):
+                        redacted_args = list(record.args)
+                        for i, v in enumerate(redacted_args):
+                            if isinstance(v, str):
+                                redacted_args[i] = token_pattern.sub("***REDACTED***", v)
+                        record.args = tuple(redacted_args)
+                # Also scan common attributes for embedded secrets
+                for attr in ("message", "pathname", "filename"):
+                    val = getattr(record, attr, None)
+                    if isinstance(val, str):
+                        setattr(record, attr, token_pattern.sub("***REDACTED***", val))
             except Exception:
                 pass
             return True
@@ -476,6 +506,10 @@ def setup_logging() -> None:
         logging.getLogger("uvicorn").setLevel(logging.WARNING)
         logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
         logging.getLogger("httpx").setLevel(logging.WARNING)
+        # Quiet noisy Telegram library logs in production
+        logging.getLogger("telegram").setLevel(logging.WARNING)
+        logging.getLogger("telegram.ext").setLevel(logging.WARNING)
+        logging.getLogger("telegram.bot").setLevel(logging.WARNING)
 
 
 # =============================================================================
