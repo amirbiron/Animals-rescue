@@ -1,0 +1,481 @@
+"""
+Configuration and Settings Management
+הגדרות והקונפיגורציה של המערכת
+
+This module handles all application configuration using Pydantic Settings
+with support for environment variables and 12-Factor App principles.
+"""
+
+import logging
+import secrets
+from functools import lru_cache
+from pathlib import Path
+from typing import Any, Dict, List, Literal, Optional
+
+from pydantic import (
+    AnyHttpUrl,
+    BaseSettings,
+    EmailStr,
+    Field,
+    PostgresDsn,
+    field_validator,
+    model_validator,
+)
+from pydantic_core.core_schema import ValidationInfo
+
+# =============================================================================
+# Base Directories
+# =============================================================================
+
+# Project root directory
+PROJECT_ROOT = Path(__file__).parent.parent.parent.absolute()
+
+# =============================================================================
+# Core Application Settings
+# =============================================================================
+
+class Settings(BaseSettings):
+    """
+    Application settings with environment variable support.
+    
+    All settings can be overridden via environment variables.
+    For nested settings, use double underscore: DATABASE__HOST=localhost
+    """
+    
+    # =========================================================================
+    # Application Core
+    # =========================================================================
+    
+    # Application metadata
+    APP_NAME: str = "Animal Rescue Bot"
+    APP_VERSION: str = "1.0.0"
+    APP_DESCRIPTION: str = "בוט הצלת בעלי חיים - דיווח והתראות מהיר"
+    
+    # Environment configuration
+    ENVIRONMENT: Literal["development", "testing", "staging", "production"] = "development"
+    DEBUG: bool = Field(default=False, description="Debug mode")
+    
+    # Security
+    SECRET_KEY: str = Field(
+        default_factory=lambda: secrets.token_urlsafe(32),
+        description="Secret key for JWT and other cryptographic operations"
+    )
+    
+    # API Configuration
+    API_V1_PREFIX: str = "/api/v1"
+    CORS_ORIGINS: List[str] = Field(
+        default=["*"],  # In production, replace with specific origins
+        description="Allowed CORS origins"
+    )
+    
+    # =========================================================================
+    # Database Configuration (PostgreSQL)
+    # =========================================================================
+    
+    # PostgreSQL connection parameters
+    POSTGRES_HOST: str = Field(default="localhost", description="PostgreSQL host")
+    POSTGRES_PORT: int = Field(default=5432, description="PostgreSQL port")
+    POSTGRES_DB: str = Field(default="animal_rescue", description="Database name")
+    POSTGRES_USER: str = Field(default="postgres", description="Database user")
+    POSTGRES_PASSWORD: str = Field(default="postgres", description="Database password")
+    
+    # Connection pool settings
+    DATABASE_POOL_SIZE: int = Field(default=10, description="Database connection pool size")
+    DATABASE_MAX_OVERFLOW: int = Field(default=20, description="Max overflow connections")
+    DATABASE_POOL_TIMEOUT: int = Field(default=30, description="Pool timeout in seconds")
+    DATABASE_ECHO: bool = Field(default=False, description="Echo SQL queries")
+    
+    # Computed database URL (will be set by model_validator)
+    DATABASE_URL: Optional[PostgresDsn] = None
+    
+    @model_validator(mode='after')
+    def assemble_database_url(self) -> 'Settings':
+        """Construct the database URL from components."""
+        self.DATABASE_URL = PostgresDsn.build(
+            scheme="postgresql+asyncpg",
+            username=self.POSTGRES_USER,
+            password=self.POSTGRES_PASSWORD,
+            host=self.POSTGRES_HOST,
+            port=self.POSTGRES_PORT,
+            path=self.POSTGRES_DB,
+        )
+        return self
+    
+    # =========================================================================
+    # Redis Configuration
+    # =========================================================================
+    
+    REDIS_HOST: str = Field(default="localhost", description="Redis host")
+    REDIS_PORT: int = Field(default=6379, description="Redis port")
+    REDIS_DB: int = Field(default=0, description="Redis database number")
+    REDIS_PASSWORD: Optional[str] = Field(default=None, description="Redis password")
+    REDIS_MAX_CONNECTIONS: int = Field(default=20, description="Redis connection pool size")
+    
+    # Redis URLs for different purposes
+    @property
+    def REDIS_URL(self) -> str:
+        """Main Redis URL for general purpose."""
+        auth_part = f":{self.REDIS_PASSWORD}@" if self.REDIS_PASSWORD else ""
+        return f"redis://{auth_part}{self.REDIS_HOST}:{self.REDIS_PORT}/{self.REDIS_DB}"
+    
+    @property
+    def REDIS_QUEUE_URL(self) -> str:
+        """Redis URL for RQ job queue (uses DB 1)."""
+        auth_part = f":{self.REDIS_PASSWORD}@" if self.REDIS_PASSWORD else ""
+        return f"redis://{auth_part}{self.REDIS_HOST}:{self.REDIS_PORT}/1"
+    
+    # =========================================================================
+    # Telegram Bot Configuration
+    # =========================================================================
+    
+    # Bot credentials
+    TELEGRAM_BOT_TOKEN: str = Field(description="Telegram bot token from @BotFather")
+    TELEGRAM_WEBHOOK_SECRET: Optional[str] = Field(
+        default=None,
+        description="Webhook secret token for security"
+    )
+    
+    # Webhook configuration
+    WEBHOOK_HOST: Optional[str] = Field(
+        default=None,
+        description="Public host for webhook (e.g., https://your-app.com)"
+    )
+    WEBHOOK_PATH: str = Field(
+        default="/telegram/webhook",
+        description="Webhook endpoint path"
+    )
+    
+    @property
+    def TELEGRAM_WEBHOOK_URL(self) -> Optional[str]:
+        """Complete webhook URL."""
+        if self.WEBHOOK_HOST:
+            return f"{self.WEBHOOK_HOST.rstrip('/')}{self.WEBHOOK_PATH}"
+        return None
+    
+    # Rate limiting for bot
+    TELEGRAM_RATE_LIMIT_MESSAGES: int = Field(default=20, description="Messages per minute per user")
+    TELEGRAM_RATE_LIMIT_WINDOW: int = Field(default=60, description="Rate limit window in seconds")
+    
+    # =========================================================================
+    # External APIs Configuration
+    # =========================================================================
+    
+    # Google APIs
+    GOOGLE_PLACES_API_KEY: Optional[str] = Field(
+        default=None,
+        description="Google Places API key"
+    )
+    GOOGLE_GEOCODING_API_KEY: Optional[str] = Field(
+        default=None,
+        description="Google Geocoding API key (can be same as Places)"
+    )
+    
+    # API rate limits
+    GOOGLE_API_RATE_LIMIT: int = Field(default=10, description="Google API requests per second")
+    GOOGLE_API_QUOTA_DAILY: int = Field(default=1000, description="Daily API quota limit")
+    
+    # =========================================================================
+    # File Storage Configuration
+    # =========================================================================
+    
+    # File storage backend
+    STORAGE_BACKEND: Literal["local", "s3", "r2"] = Field(default="local")
+    
+    # Local storage
+    UPLOAD_DIR: Path = Field(default=PROJECT_ROOT / "uploads")
+    MAX_FILE_SIZE_MB: int = Field(default=10, description="Max file size in MB")
+    ALLOWED_FILE_TYPES: List[str] = Field(
+        default=["image/jpeg", "image/png", "image/webp"],
+        description="Allowed MIME types for uploads"
+    )
+    
+    # S3/R2 Configuration (Cloudflare R2)
+    S3_ENDPOINT_URL: Optional[str] = Field(default=None, description="S3/R2 endpoint URL")
+    S3_ACCESS_KEY_ID: Optional[str] = Field(default=None)
+    S3_SECRET_ACCESS_KEY: Optional[str] = Field(default=None)
+    S3_BUCKET_NAME: Optional[str] = Field(default=None)
+    S3_REGION: str = Field(default="auto", description="S3 region")
+    
+    # File lifecycle
+    FILE_CLEANUP_DAYS: int = Field(default=180, description="Days before cleaning up old files")
+    
+    # =========================================================================
+    # Email Configuration
+    # =========================================================================
+    
+    # SMTP settings
+    SMTP_HOST: Optional[str] = Field(default=None)
+    SMTP_PORT: int = Field(default=587)
+    SMTP_USER: Optional[EmailStr] = Field(default=None)
+    SMTP_PASSWORD: Optional[str] = Field(default=None)
+    SMTP_TLS: bool = Field(default=True)
+    
+    # Email addresses
+    EMAILS_FROM_EMAIL: Optional[EmailStr] = Field(default=None)
+    EMAILS_FROM_NAME: str = Field(default="Animal Rescue Bot")
+    
+    # =========================================================================
+    # Logging and Monitoring
+    # =========================================================================
+    
+    # Logging configuration
+    LOG_LEVEL: str = Field(default="INFO")
+    LOG_FORMAT: Literal["json", "pretty"] = Field(default="pretty")
+    
+    # Sentry for error tracking
+    SENTRY_DSN: Optional[str] = Field(default=None, description="Sentry DSN for error tracking")
+    
+    # Metrics and health checks
+    METRICS_ENABLED: bool = Field(default=True)
+    HEALTH_CHECK_PATH: str = Field(default="/health")
+    
+    # =========================================================================
+    # Internationalization
+    # =========================================================================
+    
+    # Supported languages
+    SUPPORTED_LANGUAGES: List[str] = Field(default=["he", "ar", "en"])
+    DEFAULT_LANGUAGE: str = Field(default="he")
+    
+    # =========================================================================
+    # Background Jobs Configuration
+    # =========================================================================
+    
+    # RQ Worker configuration
+    WORKER_PROCESSES: int = Field(default=2, description="Number of worker processes")
+    WORKER_TIMEOUT: int = Field(default=300, description="Worker job timeout in seconds")
+    
+    # Job retry configuration
+    JOB_MAX_RETRIES: int = Field(default=3)
+    JOB_RETRY_DELAY: int = Field(default=60, description="Delay between retries in seconds")
+    
+    # =========================================================================
+    # Business Logic Configuration
+    # =========================================================================
+    
+    # Report settings
+    REPORT_EXPIRY_DAYS: int = Field(default=30, description="Days before reports expire")
+    MAX_REPORTS_PER_USER_PER_DAY: int = Field(default=10)
+    
+    # Search radius for organizations (in kilometers)
+    SEARCH_RADIUS_KM: float = Field(default=20.0)
+    MAX_SEARCH_RADIUS_KM: float = Field(default=50.0)
+    
+    # Alert settings
+    ALERT_TIMEOUT_MINUTES: int = Field(default=15, description="Minutes before alert timeout")
+    MAX_ALERTS_PER_REPORT: int = Field(default=5)
+    
+    # Trust system
+    ENABLE_TRUST_SYSTEM: bool = Field(default=True)
+    MIN_TRUST_SCORE: float = Field(default=0.0)
+    MAX_TRUST_SCORE: float = Field(default=10.0)
+    
+    # =========================================================================
+    # Development and Testing
+    # =========================================================================
+    
+    # Testing
+    TESTING: bool = Field(default=False)
+    TEST_DATABASE_URL: Optional[str] = Field(default=None)
+    
+    # Development helpers
+    AUTO_RELOAD: bool = Field(default=False)
+    SHOW_DOCS: bool = Field(default=True, description="Show API documentation")
+    
+    # =========================================================================
+    # Validation and Post-Processing
+    # =========================================================================
+    
+    @field_validator('CORS_ORIGINS', mode='before')
+    def assemble_cors_origins(cls, v: Any) -> List[str]:
+        """Parse CORS origins from string or list."""
+        if isinstance(v, str) and not v.startswith('['):
+            return [i.strip() for i in v.split(',')]
+        elif isinstance(v, (list, str)):
+            return v
+        raise ValueError(f"Invalid CORS_ORIGINS: {v}")
+    
+    @field_validator('UPLOAD_DIR')
+    def ensure_upload_dir_exists(cls, v: Path) -> Path:
+        """Ensure upload directory exists."""
+        v = Path(v)
+        v.mkdir(parents=True, exist_ok=True)
+        return v
+    
+    @model_validator(mode='after')
+    def validate_storage_config(self) -> 'Settings':
+        """Validate storage configuration."""
+        if self.STORAGE_BACKEND in ["s3", "r2"]:
+            required_fields = [
+                "S3_ENDPOINT_URL", "S3_ACCESS_KEY_ID", 
+                "S3_SECRET_ACCESS_KEY", "S3_BUCKET_NAME"
+            ]
+            for field in required_fields:
+                if not getattr(self, field):
+                    raise ValueError(f"{field} is required when using {self.STORAGE_BACKEND} storage")
+        return self
+    
+    @model_validator(mode='after')
+    def validate_email_config(self) -> 'Settings':
+        """Validate email configuration."""
+        email_fields = ["SMTP_HOST", "SMTP_USER", "SMTP_PASSWORD", "EMAILS_FROM_EMAIL"]
+        if any(getattr(self, field) for field in email_fields):
+            # If any email field is set, require all
+            for field in email_fields:
+                if not getattr(self, field):
+                    raise ValueError(f"{field} is required when email is configured")
+        return self
+    
+    # =========================================================================
+    # Environment-specific configurations
+    # =========================================================================
+    
+    @property
+    def is_production(self) -> bool:
+        """Check if running in production."""
+        return self.ENVIRONMENT == "production"
+    
+    @property
+    def is_development(self) -> bool:
+        """Check if running in development."""
+        return self.ENVIRONMENT == "development"
+    
+    @property
+    def is_testing(self) -> bool:
+        """Check if running tests."""
+        return self.ENVIRONMENT == "testing" or self.TESTING
+    
+    # =========================================================================
+    # Computed Properties
+    # =========================================================================
+    
+    @property
+    def DATABASE_ENGINE_OPTIONS(self) -> Dict[str, Any]:
+        """Database engine configuration options."""
+        return {
+            "pool_size": self.DATABASE_POOL_SIZE,
+            "max_overflow": self.DATABASE_MAX_OVERFLOW,
+            "pool_timeout": self.DATABASE_POOL_TIMEOUT,
+            "echo": self.DATABASE_ECHO and not self.is_production,
+            "echo_pool": self.DEBUG and not self.is_production,
+            "pool_pre_ping": True,  # Validate connections before use
+            "pool_recycle": 3600,   # Recycle connections every hour
+        }
+    
+    # =========================================================================
+    # Model Configuration
+    # =========================================================================
+    
+    model_config = {
+        "env_file": ".env",
+        "env_file_encoding": "utf-8",
+        "case_sensitive": True,
+        "env_nested_delimiter": "__",  # Allow nested config via ENV_VAR__NESTED_VAR
+        "validate_assignment": True,   # Validate on assignment
+        "extra": "ignore",            # Ignore unknown fields
+    }
+
+
+# =============================================================================
+# Settings Instance and Cache
+# =============================================================================
+
+@lru_cache()
+def get_settings() -> Settings:
+    """
+    Get cached settings instance.
+    
+    This function is cached to avoid re-parsing environment variables
+    on every call. In development, you may need to clear the cache
+    if you change environment variables.
+    """
+    return Settings()
+
+
+# Convenience alias for global access
+settings = get_settings()
+
+
+# =============================================================================
+# Logging Configuration
+# =============================================================================
+
+def setup_logging() -> None:
+    """Configure structured logging for the application."""
+    import structlog
+    from structlog import configure, get_logger
+    
+    # Configure structlog
+    configure(
+        processors=[
+            structlog.contextvars.merge_contextvars,
+            structlog.processors.add_log_level,
+            structlog.processors.StackInfoRenderer(),
+            structlog.processors.TimeStamper(fmt="iso"),
+            (
+                structlog.dev.ConsoleRenderer()
+                if settings.LOG_FORMAT == "pretty"
+                else structlog.processors.JSONRenderer()
+            ),
+        ],
+        wrapper_class=structlog.make_filtering_bound_logger(
+            getattr(logging, settings.LOG_LEVEL.upper())
+        ),
+        logger_factory=structlog.PrintLoggerFactory(),
+        cache_logger_on_first_use=True,
+    )
+    
+    # Configure standard library logging
+    logging.basicConfig(
+        level=getattr(logging, settings.LOG_LEVEL.upper()),
+        format="%(message)s" if settings.LOG_FORMAT == "json" else None,
+    )
+    
+    # Suppress noisy loggers in production
+    if settings.is_production:
+        logging.getLogger("uvicorn").setLevel(logging.WARNING)
+        logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
+        logging.getLogger("httpx").setLevel(logging.WARNING)
+
+
+# =============================================================================
+# Utility Functions
+# =============================================================================
+
+def get_database_url(for_testing: bool = False) -> str:
+    """Get database URL, optionally for testing."""
+    if for_testing and settings.TEST_DATABASE_URL:
+        return settings.TEST_DATABASE_URL
+    return str(settings.DATABASE_URL)
+
+
+def is_feature_enabled(feature_name: str) -> bool:
+    """Check if a feature is enabled via environment variable."""
+    env_var = f"ENABLE_{feature_name.upper()}"
+    return getattr(settings, env_var, False)
+
+
+# =============================================================================
+# Development Helpers
+# =============================================================================
+
+if __name__ == "__main__":
+    # Print current configuration for debugging
+    import json
+    from pydantic import BaseModel
+    
+    # Create a serializable version of settings
+    config_dict = settings.model_dump()
+    
+    # Remove sensitive information
+    sensitive_fields = [
+        "SECRET_KEY", "TELEGRAM_BOT_TOKEN", "POSTGRES_PASSWORD",
+        "REDIS_PASSWORD", "GOOGLE_PLACES_API_KEY", "SMTP_PASSWORD",
+        "S3_SECRET_ACCESS_KEY", "SENTRY_DSN"
+    ]
+    
+    for field in sensitive_fields:
+        if field in config_dict:
+            config_dict[field] = "***REDACTED***"
+    
+    print(json.dumps(config_dict, indent=2, default=str))
