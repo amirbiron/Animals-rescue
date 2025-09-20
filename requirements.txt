@@ -78,6 +78,7 @@ rich==13.9.4                         # Rich terminal output
 pendulum==3.0.0                      # Better datetime handling
 pycountry==24.6.1                    # Country/language codes
 aiofiles==24.1.0                     # Async file IO (required by email service)
+psutil==5.9.8                        # System metrics (used by workers manager)
 
 # Retry utilities (used by app.services.google)
 tenacity==9.0.0

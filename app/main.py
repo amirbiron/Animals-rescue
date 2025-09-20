@@ -411,8 +411,22 @@ async def rate_limiting_middleware(request: Request, call_next):
     from app.core.rate_limit import check_rate_limit, RateLimitExceeded
     
     try:
-        # Skip rate limiting for health checks and metrics
-        if request.url.path in ["/health", "/metrics"]:
+        # Skip rate limiting for health checks, docs, static, and Telegram webhook
+        path = request.url.path
+        excluded = {
+            "/health",
+            "/metrics",
+            "/docs",
+            "/redoc",
+            "/openapi.json",
+            f"{settings.API_V1_PREFIX}/openapi.json",
+        }
+        if (
+            path in excluded
+            or path.startswith("/static")
+            or path.startswith("/uploads")
+            or path.startswith("/telegram/webhook")
+        ):
             return await call_next(request)
         
         # Get client identifier
@@ -426,14 +440,22 @@ async def rate_limiting_middleware(request: Request, call_next):
                 pass  # Fall back to IP-based limiting
         
         # Check rate limit
-        await check_rate_limit(client_id, request.url.path)
+        await check_rate_limit(client_id, path)
         
         return await call_next(request)
         
     except RateLimitExceeded as e:
-        raise HTTPException(
+        # Return structured 429 response without triggering 500 error handler logs
+        return JSONResponse(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail=f"Rate limit exceeded. Try again in {e.retry_after} seconds.",
+            content={
+                "error": True,
+                "error_code": "RATE_LIMIT_EXCEEDED",
+                "message": f"Rate limit exceeded. Try again in {e.retry_after} seconds.",
+                "retry_after": e.retry_after,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "request_id": getattr(request.state, "request_id", None),
+            },
             headers={"Retry-After": str(e.retry_after)}
         )
 
