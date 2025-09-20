@@ -3488,7 +3488,7 @@ def create_bot_application() -> Application:
     application.add_handler(MessageHandler(
         filters.TEXT & ~filters.COMMAND,
         handle_admin_add_org_name_input
-    ), block=False)
+    ))
     # Handle text inputs for quiet hours and contact details
     application.add_handler(MessageHandler(
         filters.TEXT & ~filters.COMMAND,
