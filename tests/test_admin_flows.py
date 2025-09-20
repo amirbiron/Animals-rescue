@@ -269,3 +269,84 @@ async def test_add_org_handlers_guard_wrong_step():
     res_email = await handle_admin_add_org_email_input(update_email, ctx)
     assert res_email == ADMIN_ADD_ORG_EMAIL
     assert update_email.message.calls == []
+
+
+@pytest.mark.asyncio
+async def test_add_org_invalid_email_stays_in_state():
+    ctx = make_context()
+    # Move to email step first
+    ctx.user_data["add_org"] = {"step": "email", "name": "Org X", "org_type": "animal_shelter"}
+    msg = MsgStub(text="not-an-email")
+    update = types.SimpleNamespace(message=msg, effective_user=None, effective_chat=None)
+    res = await handle_admin_add_org_email_input(update, ctx)
+    # Should stay in ADMIN_ADD_ORG_EMAIL and reply invalid
+    assert res == ADMIN_ADD_ORG_EMAIL
+    assert ctx.user_data["add_org"]["step"] == "email"
+    assert msg.calls  # invalid email reply
+
+
+@pytest.mark.asyncio
+async def test_admin_add_org_type_without_name_shows_error():
+    ctx = make_context()
+    ctx.user_data["add_org"] = {"step": "type"}
+    cq = CqStub(data="admin_add_org_type_animal_shelter")
+    update = types.SimpleNamespace(callback_query=cq, effective_user=None, effective_chat=None)
+    res = await handle_admin_add_org_type(update, ctx)
+    # Handler responds with operation failed and stays in type state
+    assert res == ADMIN_ADD_ORG_TYPE
+    assert cq.edited  # some error message was sent
+
+
+@pytest.mark.asyncio
+async def test_import_location_success_flow():
+    ctx = make_context()
+    # Start via callback
+    cq = CqStub(data="admin_import_location")
+    update_cq = types.SimpleNamespace(callback_query=cq, effective_user=None, effective_chat=None)
+    state = await handle_admin_import_location(update_cq, ctx)
+    assert state == ADMIN_IMPORT_LOCATION_INPUT
+    assert ctx.user_data.get("awaiting_import_location") is True
+
+    # Choose radius
+    msg_r = MsgStub(text="רדיוס 10 ק""מ")
+    res_r = await handle_admin_import_location_inputs(types.SimpleNamespace(message=msg_r, effective_user=None, effective_chat=None), ctx)
+    assert res_r == ADMIN_IMPORT_LOCATION_INPUT
+    assert ctx.user_data.get("import_radius_m") == 10000
+
+    # Send location with mocked Google
+    class _DummyGoogle:
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+        async def search_veterinary_nearby(self, loc, radius: int):
+            return [{"name": "Vet", "place_id": "v1"}]
+        async def search_shelters_nearby(self, loc, radius: int):
+            return [{"name": "Shelter", "place_id": "s1"}]
+
+    class _FakeSession:
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+        async def execute(self, *a, **k):
+            class _R:
+                def scalar_one_or_none(self_inner):
+                    return None
+            return _R()
+        def add(self, *a, **k):
+            return None
+        async def commit(self):
+            return None
+
+    class _Loc:
+        latitude = 32.18
+        longitude = 34.87
+    msg_loc = MsgStub(location=_Loc())
+    with patch("app.services.google.GoogleService", return_value=_DummyGoogle()):
+        with patch("app.bot.handlers.async_session_maker", return_value=_FakeSession()):
+            end = await handle_admin_import_location_inputs(types.SimpleNamespace(message=msg_loc, effective_user=None, effective_chat=None), ctx)
+            assert end == ConversationHandler.END
+            assert "awaiting_import_location" not in ctx.user_data
+            assert "import_radius_m" not in ctx.user_data
+            assert msg_loc.calls  # completion reply
