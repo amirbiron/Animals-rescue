@@ -3480,6 +3480,11 @@ def create_bot_application() -> Application:
         filters.LOCATION,
         handle_service_area_location
     ))
+    # Admin add organization: capture name input early before generic text handlers
+    application.add_handler(MessageHandler(
+        filters.TEXT & ~filters.COMMAND,
+        handle_admin_add_org_name_input
+    ))
     # Handle text inputs for quiet hours and contact details
     application.add_handler(MessageHandler(
         filters.TEXT & ~filters.COMMAND,
@@ -3497,10 +3502,6 @@ def create_bot_application() -> Application:
     application.add_handler(MessageHandler(
         filters.TEXT & ~filters.COMMAND,
         handle_admin_search_input
-    ))
-    application.add_handler(MessageHandler(
-        filters.TEXT & ~filters.COMMAND,
-        handle_admin_add_org_name_input
     ))
     application.add_handler(MessageHandler(
         filters.TEXT & ~filters.COMMAND,
