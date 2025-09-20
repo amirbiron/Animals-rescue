@@ -1,0 +1,16 @@
+name,address,lat,lon,category,phone,whatsapp,email,preferred_channel,languages,website,verification_status,last_verified_at,source_kind,source_reference,notes
+"עמותת החילוץ תל אביב","רח' המסגר 10, תל אביב",32.066,34.777,animal_shelter,+972500000101,+972500000101,ta-shelter@example.org,whatsapp,he|en,https://ta-shelter.example.org,partial,2025-09-15T10:00:00Z,manual,volunteer:ta,DEMO ONLY
+"וטרינר תורן תל אביב","אבן גבירול 50, תל אביב",32.080,34.781,veterinary,+972500000102,+972500000102,tlv-vet@example.org,sms,he|en,https://tlv-vet.example.org,unverified,,osm,node/123456,DEMO ONLY
+"עמותת החילוץ ירושלים","יפו 100, ירושלים",31.780,35.220,animal_shelter,+972500000103,+972500000103,jer-shelter@example.org,whatsapp,he|en,https://jer-shelter.example.org,partial,2025-09-12T09:00:00Z,serpapi,place:ChIJabcJeru,DEMO ONLY
+"וטרינר חירום ירושלים","הרצל 12, ירושלים",31.785,35.213,veterinary,+972500000104,,jer-vet@example.org,email,he|en,https://jer-vet.example.org,unverified,,google_places,ChIJKjer,DEMO ONLY
+"מקלט חיות חיפה","שדרות ההגנה 1, חיפה",32.800,34.990,animal_shelter,+972500000105,+972500000105,haifa-shelter@example.org,whatsapp,he|en,,verified,2025-09-10T12:00:00Z,sheet,gsheet:row_5,DEMO ONLY
+"וטרינר 24/7 חיפה","חלוצי התעשייה 3, חיפה",32.792,35.001,veterinary,+972500000106,,haifa-vet@example.org,sms,he|en,,partial,2025-09-11T08:30:00Z,osm,node/654321,DEMO ONLY
+"עמותת החילוץ באר שבע","רגר 88, באר שבע",31.252,34.791,animal_shelter,+972500000107,+972500000107,bs-shelter@example.org,whatsapp,he|en,,unverified,,manual,volunteer:bs,DEMO ONLY
+"וטרינר עירוני ראשון לציון","שמוטקין 5, ראשון לציון",31.970,34.785,municipal_vet,+972500000108,,rishon-muni@example.org,email,he|en,,partial,2025-09-09T07:45:00Z,serpapi,place:Rishon,DEMO ONLY
+"עמותת החילוץ פתח תקווה","ז'בוטינסקי 120, פתח תקווה",32.091,34.887,animal_shelter,+972500000109,+972500000109,pt-shelter@example.org,whatsapp,he|en,,unverified,,sheet,gsheet:row_9,DEMO ONLY
+"וטרינר תורן נתניה","הרצל 10, נתניה",32.329,34.856,veterinary,+972500000110,,netanya-vet@example.org,sms,he|en,,partial,2025-09-13T16:00:00Z,google_places,ChIJNet,DEMO ONLY
+"מקלט חיות אשדוד","האורגים 25, אשדוד",31.792,34.650,animal_shelter,+972500000111,+972500000111,ashdod-shelter@example.org,whatsapp,he|en,,verified,2025-09-08T14:20:00Z,manual,volunteer:ashdod,DEMO ONLY
+"וטרינר אשקלון","הנשיא 7, אשקלון",31.668,34.571,veterinary,+972500000112,,ashkelon-vet@example.org,email,he|en,,unverified,,osm,node/778899,DEMO ONLY
+"עמותת החילוץ מודיעין","לב העיר 2, מודיעין",31.902,35.007,animal_shelter,+972500000113,+972500000113,modiin-shelter@example.org,whatsapp,he|en,,partial,2025-09-14T11:10:00Z,serpapi,place:Modiin,DEMO ONLY
+"וטרינר רחובות","וייצמן 60, רחובות",31.896,34.810,veterinary,+972500000114,,rehovot-vet@example.org,sms,he|en,,unverified,,sheet,gsheet:row_14,DEMO ONLY
+"וטרינר עירוני רמת גן","ביאליק 40, רמת גן",32.082,34.811,municipal_vet,+972500000115,,rg-muni@example.org,email,he|en,,partial,2025-09-07T10:30:00Z,google_places,ChIJRG,DEMO ONLY
