@@ -2652,7 +2652,7 @@ async def handle_admin_import_google_input(update: Update, context: ContextTypes
 
         # Clear flag and report result
         context.user_data.pop("awaiting_google_city", None)
-    logger.info("import_google_city_completed", city=city, created=created)
+        logger.info("import_google_city_completed", city=city, created=created)
         await update.message.reply_text(f"ייבוא מגוגל הושלם. נוספו {created} ארגונים חדשים בעיר {city}.")
 
 
