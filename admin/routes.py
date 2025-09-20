@@ -47,7 +47,8 @@ from app.workers.jobs import (
     send_test_alert,
     generate_daily_statistics,
     cleanup_old_data,
-    retry_failed_alerts
+    retry_failed_alerts,
+    enqueue_or_run,
 )
 from app.core.cache import redis_client
 from app.core.i18n import get_supported_languages
@@ -280,17 +281,20 @@ async def get_admin_stats(
         
         # System stats
         worker_status = await worker_manager.get_status()
-        workers_active = len([
-            w for w in worker_status.get('workers', {}).values() 
-            if w.get('is_alive', False)
-        ])
-        
-        queues_total_jobs = sum(
-            q.get('pending', 0) for q in worker_status.get('queues', {}).values()
-            if isinstance(q, dict)
-        )
-        
-        system_uptime_hours = worker_status.get('uptime_seconds', 0) / 3600
+        if not settings.ENABLE_WORKERS:
+            workers_active = 0
+            queues_total_jobs = 0
+            system_uptime_hours = 0
+        else:
+            workers_active = len([
+                w for w in worker_status.get('workers', {}).values() 
+                if w.get('is_alive', False)
+            ])
+            queues_total_jobs = sum(
+                q.get('pending', 0) for q in worker_status.get('queues', {}).values()
+                if isinstance(q, dict)
+            )
+            system_uptime_hours = worker_status.get('uptime_seconds', 0) / 3600
         
         return AdminStats(
             users_total=users_total or 0,
@@ -344,23 +348,30 @@ async def get_system_health(current_user: User = Depends(require_admin)):
         
         # Workers health
         worker_status = await worker_manager.get_status()
-        workers_health = {
-            "status": "healthy" if worker_status["manager_status"] == "running" else "error",
-            "active_workers": len([
-                w for w in worker_status.get('workers', {}).values() 
-                if w.get('is_alive', False)
-            ]),
-            "total_workers": len(worker_status.get('workers', {})),
-            "queues": worker_status.get('queues', {})
-        }
-        
-        if workers_health["active_workers"] == 0:
-            health_status = "critical"
-            issues.append("No active workers")
-        elif workers_health["active_workers"] < workers_health["total_workers"]:
-            if health_status == "healthy":
-                health_status = "warning"
-            issues.append("Some workers are down")
+        if not settings.ENABLE_WORKERS:
+            workers_health = {
+                "status": "disabled",
+                "active_workers": 0,
+                "total_workers": 0,
+                "queues": {}
+            }
+        else:
+            workers_health = {
+                "status": "healthy" if worker_status["manager_status"] == "running" else "error",
+                "active_workers": len([
+                    w for w in worker_status.get('workers', {}).values() 
+                    if w.get('is_alive', False)
+                ]),
+                "total_workers": len(worker_status.get('workers', {})),
+                "queues": worker_status.get('queues', {})
+            }
+            if workers_health["active_workers"] == 0:
+                health_status = "critical"
+                issues.append("No active workers")
+            elif workers_health["active_workers"] < workers_health["total_workers"]:
+                if health_status == "healthy":
+                    health_status = "warning"
+                issues.append("Some workers are down")
         
         # External services health
         external_services = {}
@@ -730,8 +741,8 @@ async def test_system_alerts(
     
     # Test worker queue
     try:
-        job = send_test_alert.delay("Admin panel test message")
-        results["workers"] = {"status": "queued", "job_id": job.id}
+        job = enqueue_or_run(send_test_alert, "Admin panel test message")
+        results["workers"] = {"status": "queued", "job_id": getattr(job, 'id', None)}
     except Exception as e:
         results["workers"] = {"status": "error", "error": str(e)}
     
@@ -746,16 +757,16 @@ async def run_maintenance_action(
     """Run system maintenance actions."""
     
     if action == "cleanup_old_data":
-        job = cleanup_old_data.delay()
-        return {"message": "Data cleanup job started", "job_id": job.id}
+        job = enqueue_or_run(cleanup_old_data)
+        return {"message": "Data cleanup job started", "job_id": getattr(job, 'id', None)}
     
     elif action == "retry_failed_alerts":
-        job = retry_failed_alerts.delay()
-        return {"message": "Alert retry job started", "job_id": job.id}
+        job = enqueue_or_run(retry_failed_alerts)
+        return {"message": "Alert retry job started", "job_id": getattr(job, 'id', None)}
     
     elif action == "generate_statistics":
-        job = generate_daily_statistics.delay()
-        return {"message": "Statistics generation started", "job_id": job.id}
+        job = enqueue_or_run(generate_daily_statistics)
+        return {"message": "Statistics generation started", "job_id": getattr(job, 'id', None)}
     
     elif action == "restart_workers":
         try:

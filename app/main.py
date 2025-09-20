@@ -672,7 +672,7 @@ async def version_info():
 # =============================================================================
 
 # Serve uploaded files (only in development)
-if settings.is_development:
+    if settings.is_development:
     uploads_dir = settings.UPLOAD_DIR
     uploads_dir.mkdir(exist_ok=True)
     app.mount("/uploads", StaticFiles(directory=uploads_dir), name="uploads")
@@ -727,10 +727,10 @@ if settings.is_development:
     @app.post("/dev/trigger-test-alert")
     async def trigger_test_alert():
         """Trigger a test alert for development."""
-        from app.workers.jobs import send_test_alert
+        from app.workers.jobs import send_test_alert, enqueue_or_run
         
-        job = send_test_alert.delay("Test alert from development endpoint")
-        return {"message": "Test alert queued", "job_id": job.id}
+        job = enqueue_or_run(send_test_alert, "Test alert from development endpoint")
+        return {"message": "Test alert queued", "job_id": getattr(job, 'id', None)}
     
     @app.get("/dev/db-stats")
     async def database_stats():

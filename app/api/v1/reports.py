@@ -28,7 +28,7 @@ from app.models.database import (
 from app.services.file_storage import FileStorageService
 from app.services.geocoding import GeocodingService
 from app.services.nlp import NLPService
-from app.workers.jobs import process_new_report, send_organization_alert
+from app.workers.jobs import process_new_report, send_organization_alert, enqueue_or_run
 from app.core.exceptions import NotFoundError, ValidationError, PermissionDeniedError
 
 # =============================================================================
@@ -413,8 +413,8 @@ async def create_report(
         await session.commit()
         await session.refresh(report)
         
-        # Queue background processing
-        process_new_report.delay(str(report.id))
+        # Queue background processing (or run inline)
+        enqueue_or_run(process_new_report, str(report.id))
         
         # Update user statistics
         current_user.reports_count += 1

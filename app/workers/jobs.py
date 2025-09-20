@@ -74,7 +74,8 @@ def process_new_report(report_id: str) -> Dict[str, Any]:
         Processing results dictionary
     """
     job = get_current_job()
-    logger.info("Processing new report", report_id=report_id, job_id=job.id)
+    job_id = getattr(job, "id", None)
+    logger.info("Processing new report", report_id=report_id, job_id=job_id)
     
     try:
         # Use asyncio for async database operations
@@ -228,11 +229,17 @@ async def _process_new_report_async(report_id: str) -> Dict[str, Any]:
             for org in organizations:
                 # Create alert jobs for each channel
                 for channel in org.alert_channels:
-                    send_organization_alert.delay(
-                        report_id=report_id,
-                        organization_id=str(org.id),
-                        channel=channel
-                    )
+                    if settings.ENABLE_WORKERS:
+                        send_organization_alert.delay(
+                            report_id=report_id,
+                            organization_id=str(org.id),
+                            channel=channel
+                        )
+                    else:
+                        # Run inline in background so we don't block
+                        asyncio.create_task(_send_organization_alert_async(
+                            report_id, str(org.id), channel
+                        ))
                     results["alerts_created"] += 1
             
             results["steps_completed"].append("alerts_queued")
@@ -438,12 +445,13 @@ def send_organization_alert(
         Alert sending results
     """
     job = get_current_job()
+    job_id = getattr(job, "id", None)
     logger.info(
         "Sending organization alert",
         report_id=report_id,
         organization_id=organization_id,
         channel=channel,
-        job_id=job.id
+        job_id=job_id
     )
     
     try:
@@ -712,11 +720,16 @@ async def _retry_failed_alerts_async() -> Dict[str, int]:
         for alert in alerts_to_retry:
             try:
                 # Queue the retry job
-                send_organization_alert.delay(
-                    str(alert.report_id),
-                    str(alert.organization_id),
-                    alert.channel.value
-                )
+                if settings.ENABLE_WORKERS:
+                    send_organization_alert.delay(
+                        str(alert.report_id),
+                        str(alert.organization_id),
+                        alert.channel.value
+                    )
+                else:
+                    asyncio.create_task(_send_organization_alert_async(
+                        str(alert.report_id), str(alert.organization_id), alert.channel.value
+                    ))
                 results["retried"] += 1
                 
             except Exception as e:
@@ -1151,6 +1164,31 @@ async def _generate_daily_statistics_async() -> Dict[str, Any]:
 # =============================================================================
 # Job Scheduling and Queue Management
 # =============================================================================
+
+def enqueue_or_run(func, *args, **kwargs):
+    """Enqueue an RQ job when workers enabled, otherwise run inline (async if available)."""
+    if settings.ENABLE_WORKERS:
+        return func.delay(*args, **kwargs)
+    # Inline mode
+    # If there is an async implementation helper, prefer it
+    name = getattr(func, "__name__", "")
+    if name == "process_new_report":
+        # process_new_report has async impl _process_new_report_async
+        return asyncio.create_task(_process_new_report_async(*args, **kwargs))
+    if name == "send_organization_alert":
+        return asyncio.create_task(_send_organization_alert_async(*args, **kwargs))
+    if name == "retry_failed_alerts":
+        return asyncio.create_task(_retry_failed_alerts_async())
+    if name == "cleanup_old_data":
+        return asyncio.create_task(_cleanup_old_data_async())
+    if name == "update_organization_stats":
+        return asyncio.create_task(_update_organization_stats_async())
+    if name == "sync_google_places_data":
+        return asyncio.create_task(_sync_google_places_data_async())
+    if name == "generate_daily_statistics":
+        return asyncio.create_task(_generate_daily_statistics_async())
+    # Fallback: run sync function inline
+    return func(*args, **kwargs)
 
 def schedule_recurring_jobs():
     """Schedule recurring background jobs."""
