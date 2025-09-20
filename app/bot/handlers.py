@@ -41,7 +41,7 @@ from telegram.ext import (
 from app.core.config import settings
 from app.core.cache import redis_client
 from app.core.rate_limit import check_rate_limit, RateLimitExceeded
-from app.models.database import async_session_maker, User, Report, ReportFile
+from app.models.database import async_session_maker, User, Report, ReportFile, UserSettings, Organization
 from app.models.database import AnimalType, UrgencyLevel, ReportStatus, UserRole
 from app.services.nlp import NLPService
 from app.services.geocoding import GeocodingService
@@ -99,8 +99,12 @@ async def get_or_create_user(telegram_user: TelegramUser) -> User:
     async with async_session_maker() as session:
         # Try to find existing user
         from sqlalchemy import select
+        from sqlalchemy.orm import selectinload
+        
         result = await session.execute(
-            select(User).where(User.telegram_user_id == telegram_user.id)
+            select(User)
+            .options(selectinload(User.settings))
+            .where(User.telegram_user_id == telegram_user.id)
         )
         user = result.scalar_one_or_none()
         
@@ -126,6 +130,33 @@ async def get_or_create_user(telegram_user: TelegramUser) -> User:
         await session.commit()
         await session.refresh(user)
         return user
+
+
+async def get_or_create_user_settings(user_id: uuid.UUID) -> UserSettings:
+    """
+    Get or create user settings.
+    
+    Args:
+        user_id: User UUID
+        
+    Returns:
+        UserSettings instance
+    """
+    async with async_session_maker() as session:
+        from sqlalchemy import select
+        
+        result = await session.execute(
+            select(UserSettings).where(UserSettings.user_id == user_id)
+        )
+        settings = result.scalar_one_or_none()
+        
+        if not settings:
+            settings = UserSettings(user_id=user_id)
+            session.add(settings)
+            await session.commit()
+            await session.refresh(settings)
+        
+        return settings
 
 
 async def check_user_rate_limit(user_id: int, action: str) -> bool:
@@ -236,18 +267,35 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             app_name=settings.APP_NAME
         )
         
-        # Main menu keyboard
+        # Main menu keyboard - build based on user role
         keyboard = [
             [KeyboardButton(get_text("report_new_incident", preferred_lang))],
             [
                 KeyboardButton(get_text("my_reports", preferred_lang)),
-                KeyboardButton(get_text("help", preferred_lang))
+                KeyboardButton(get_text("user_settings", preferred_lang))
             ],
             [
-                KeyboardButton(get_text("change_language", preferred_lang)),
-                KeyboardButton(get_text("contact_emergency", preferred_lang))
+                KeyboardButton(get_text("help", preferred_lang)),
+                KeyboardButton(get_text("change_language", preferred_lang))
             ]
         ]
+        
+        # Add role-specific buttons
+        if db_user.role in [UserRole.ORG_STAFF, UserRole.ORG_ADMIN]:
+            keyboard.append([
+                KeyboardButton(get_text("org_reports_assigned", preferred_lang)),
+                KeyboardButton(get_text("org_statistics", preferred_lang))
+            ])
+        
+        if db_user.role == UserRole.SYSTEM_ADMIN:
+            keyboard.append([
+                KeyboardButton(get_text("admin_users", preferred_lang)),
+                KeyboardButton(get_text("admin_organizations", preferred_lang))
+            ])
+            keyboard.append([
+                KeyboardButton(get_text("admin_reports", preferred_lang)),
+                KeyboardButton(get_text("admin_settings", preferred_lang))
+            ])
         
         reply_markup = ReplyKeyboardMarkup(
             keyboard,
@@ -1030,6 +1078,846 @@ async def submit_report(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
 
 
 # =============================================================================
+# User Settings Handlers
+# =============================================================================
+
+async def show_user_settings_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show user settings menu."""
+    lang = get_user_language(context)
+    user = update.effective_user
+    
+    # Get user from database
+    db_user = await get_or_create_user(user)
+    
+    # Build settings menu
+    keyboard = [
+        [InlineKeyboardButton(
+            get_text("my_service_area", lang),
+            callback_data="settings_service_area"
+        )],
+        [InlineKeyboardButton(
+            get_text("notification_settings", lang),
+            callback_data="settings_notifications"
+        )],
+        [InlineKeyboardButton(
+            get_text("contact_details", lang),
+            callback_data="settings_contact"
+        )],
+        [InlineKeyboardButton(
+            get_text("back", lang),
+            callback_data="settings_back"
+        )]
+    ]
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    text = get_text("user_settings", lang)
+    
+    if update.message:
+        await update.message.reply_text(text, reply_markup=reply_markup)
+    elif update.callback_query:
+        await update.callback_query.edit_message_text(text, reply_markup=reply_markup)
+
+
+async def handle_service_area_settings(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle service area settings."""
+    query = update.callback_query
+    await query.answer()
+    
+    lang = get_user_language(context)
+    
+    # Show radius options
+    keyboard = [
+        [InlineKeyboardButton("5 ק\"מ", callback_data="service_radius_5")],
+        [InlineKeyboardButton("10 ק\"מ", callback_data="service_radius_10")],
+        [InlineKeyboardButton("20 ק\"מ", callback_data="service_radius_20")],
+        [InlineKeyboardButton("50 ק\"מ", callback_data="service_radius_50")],
+        [InlineKeyboardButton(
+            get_text("no_location_alerts", lang),
+            callback_data="service_radius_0"
+        )],
+        [InlineKeyboardButton(
+            get_text("back", lang),
+            callback_data="settings_menu"
+        )]
+    ]
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    text = f"{get_text('service_area_title', lang)}\n\n{get_text('service_area_instructions', lang)}"
+    
+    await query.edit_message_text(text, reply_markup=reply_markup)
+
+
+async def handle_service_radius_selection(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle service area radius selection."""
+    query = update.callback_query
+    await query.answer()
+    
+    lang = get_user_language(context)
+    data = query.data.replace("service_radius_", "")
+    radius = int(data)
+    
+    # Get user
+    db_user = await get_or_create_user(update.effective_user)
+    settings = await get_or_create_user_settings(db_user.id)
+    
+    if radius == 0:
+        # Disable location alerts
+        async with async_session_maker() as session:
+            settings = await session.get(UserSettings, settings.id)
+            settings.service_area_enabled = False
+            settings.service_area_radius_km = None
+            await session.commit()
+        
+        await query.edit_message_text(get_text("service_area_disabled", lang))
+    else:
+        # Request location to set service area center
+        context.user_data["pending_service_radius"] = radius
+        
+        keyboard = [
+            [KeyboardButton(
+                get_text("share_location", lang),
+                request_location=True
+            )],
+            [KeyboardButton(get_text("cancel", lang))]
+        ]
+        reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+        
+        await query.message.reply_text(
+            get_text("request_location_for_service", lang),
+            reply_markup=reply_markup
+        )
+
+
+async def handle_service_area_location(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle location for service area setup."""
+    if not update.message.location:
+        return
+    
+    lang = get_user_language(context)
+    radius = context.user_data.get("pending_service_radius")
+    
+    if not radius:
+        return
+    
+    location = update.message.location
+    
+    # Save service area settings
+    db_user = await get_or_create_user(update.effective_user)
+    
+    async with async_session_maker() as session:
+        from sqlalchemy import select
+        result = await session.execute(
+            select(UserSettings).where(UserSettings.user_id == db_user.id)
+        )
+        settings = result.scalar_one_or_none()
+        
+        if not settings:
+            settings = UserSettings(user_id=db_user.id)
+            session.add(settings)
+        
+        settings.service_area_enabled = True
+        settings.service_area_radius_km = float(radius)
+        settings.service_area_latitude = location.latitude
+        settings.service_area_longitude = location.longitude
+        
+        await session.commit()
+    
+    # Clear pending data
+    context.user_data.pop("pending_service_radius", None)
+    
+    # Show confirmation
+    await update.message.reply_text(
+        get_text("service_area_updated", lang).format(radius=radius),
+        reply_markup=ReplyKeyboardRemove()
+    )
+    
+    # Return to main menu
+    await start_command(update, context)
+
+
+async def handle_notification_settings(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle notification settings menu."""
+    query = update.callback_query
+    await query.answer()
+    
+    lang = get_user_language(context)
+    
+    keyboard = [
+        [InlineKeyboardButton(
+            get_text("notif_my_reports", lang),
+            callback_data="notif_category_my"
+        )],
+        [InlineKeyboardButton(
+            get_text("notif_area_reports", lang),
+            callback_data="notif_category_area"
+        )],
+        [InlineKeyboardButton(
+            get_text("notif_system", lang),
+            callback_data="notif_category_system"
+        )],
+        [InlineKeyboardButton(
+            get_text("quiet_hours", lang),
+            callback_data="notif_quiet_hours"
+        )],
+        [InlineKeyboardButton(
+            get_text("back", lang),
+            callback_data="settings_menu"
+        )]
+    ]
+    
+    # Add org notifications for staff
+    db_user = await get_or_create_user(update.effective_user)
+    if db_user.role in [UserRole.ORG_STAFF, UserRole.ORG_ADMIN]:
+        keyboard.insert(3, [InlineKeyboardButton(
+            get_text("notif_org_operational", lang),
+            callback_data="notif_category_org"
+        )])
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    text = f"{get_text('notifications_title', lang)}\n\n{get_text('notifications_menu', lang)}"
+    
+    await query.edit_message_text(text, reply_markup=reply_markup)
+
+
+async def handle_notification_category(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle specific notification category settings."""
+    query = update.callback_query
+    await query.answer()
+    
+    lang = get_user_language(context)
+    category = query.data.replace("notif_category_", "")
+    
+    # Get current settings
+    db_user = await get_or_create_user(update.effective_user)
+    settings = await get_or_create_user_settings(db_user.id)
+    
+    # Build menu based on category
+    keyboard = []
+    
+    if category == "my":
+        notifications = [
+            ("notif_status_updates", settings.notif_status_updates),
+            ("notif_org_messages", settings.notif_org_messages),
+            ("notif_info_requests", settings.notif_info_requests),
+        ]
+        menu_text = get_text("notif_my_reports_menu", lang)
+    elif category == "area":
+        notifications = [
+            ("notif_new_nearby", settings.notif_new_nearby),
+            ("notif_urgent_nearby", settings.notif_urgent_nearby),
+            ("notif_help_requests", settings.notif_help_requests),
+        ]
+        menu_text = get_text("notif_area_menu", lang)
+    elif category == "system":
+        notifications = [
+            ("notif_admin_messages", settings.notif_admin_messages),
+            ("notif_updates_news", settings.notif_updates_news),
+            ("notif_reminders", settings.notif_reminders),
+        ]
+        menu_text = get_text("notif_system_menu", lang)
+    elif category == "org":
+        notifications = [
+            ("notif_new_assigned", settings.notif_new_assigned),
+            ("notif_pending_reminders", settings.notif_pending_reminders),
+            ("notif_performance_updates", settings.notif_performance_updates),
+        ]
+        menu_text = get_text("notif_org_menu", lang)
+    else:
+        return
+    
+    # Create toggle buttons
+    for notif_key, enabled in notifications:
+        icon = "✅" if enabled else "❌"
+        text = get_text(notif_key, lang)
+        keyboard.append([InlineKeyboardButton(
+            f"{icon} {text}",
+            callback_data=f"toggle_{notif_key}"
+        )])
+    
+    keyboard.append([InlineKeyboardButton(
+        get_text("back", lang),
+        callback_data="settings_notifications"
+    )])
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await query.edit_message_text(menu_text, reply_markup=reply_markup)
+
+
+async def handle_notification_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Toggle specific notification setting."""
+    query = update.callback_query
+    await query.answer()
+    
+    setting_key = query.data.replace("toggle_", "")
+    
+    # Update setting in database
+    db_user = await get_or_create_user(update.effective_user)
+    
+    async with async_session_maker() as session:
+        from sqlalchemy import select
+        result = await session.execute(
+            select(UserSettings).where(UserSettings.user_id == db_user.id)
+        )
+        settings = result.scalar_one_or_none()
+        
+        if not settings:
+            settings = UserSettings(user_id=db_user.id)
+            session.add(settings)
+        
+        # Toggle the setting
+        current_value = getattr(settings, setting_key, False)
+        setattr(settings, setting_key, not current_value)
+        
+        await session.commit()
+    
+    # Refresh the menu
+    # Determine which category we're in
+    if setting_key in ["notif_status_updates", "notif_org_messages", "notif_info_requests"]:
+        category = "my"
+    elif setting_key in ["notif_new_nearby", "notif_urgent_nearby", "notif_help_requests"]:
+        category = "area"
+    elif setting_key in ["notif_admin_messages", "notif_updates_news", "notif_reminders"]:
+        category = "system"
+    else:
+        category = "org"
+    
+    # Simulate the category selection to refresh menu
+    query.data = f"notif_category_{category}"
+    await handle_notification_category(update, context)
+
+
+async def handle_contact_details_settings(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle contact details settings."""
+    query = update.callback_query
+    await query.answer()
+    
+    lang = get_user_language(context)
+    
+    # Get current user details
+    db_user = await get_or_create_user(update.effective_user)
+    settings = await get_or_create_user_settings(db_user.id)
+    
+    # Show current details
+    current_phone = db_user.phone or settings.secondary_phone or get_text("no", lang)
+    current_email = db_user.email or settings.secondary_email or get_text("no", lang)
+    
+    text = get_text("contact_details_current", lang).format(
+        phone=current_phone,
+        email=current_email
+    )
+    
+    keyboard = [
+        [InlineKeyboardButton(
+            get_text("update_phone", lang),
+            callback_data="contact_update_phone"
+        )],
+        [InlineKeyboardButton(
+            get_text("update_email", lang),
+            callback_data="contact_update_email"
+        )],
+        [InlineKeyboardButton(
+            get_text("add_emergency_contact", lang),
+            callback_data="contact_emergency"
+        )],
+        [InlineKeyboardButton(
+            get_text("back", lang),
+            callback_data="settings_menu"
+        )]
+    ]
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await query.edit_message_text(text, reply_markup=reply_markup)
+
+
+# =============================================================================
+# Organization Staff Handlers
+# =============================================================================
+
+async def show_assigned_reports(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show reports assigned to organization."""
+    lang = get_user_language(context)
+    user = update.effective_user
+    
+    # Get user and check permissions
+    db_user = await get_or_create_user(user)
+    
+    if db_user.role not in [UserRole.ORG_STAFF, UserRole.ORG_ADMIN]:
+        await update.message.reply_text(get_text("permission_denied", lang))
+        return
+    
+    if not db_user.organization_id:
+        await update.message.reply_text(get_text("no_organization", lang))
+        return
+    
+    # Get assigned reports
+    async with async_session_maker() as session:
+        from sqlalchemy import select, desc
+        
+        result = await session.execute(
+            select(Report)
+            .where(Report.assigned_organization_id == db_user.organization_id)
+            .where(Report.status.in_([
+                ReportStatus.SUBMITTED,
+                ReportStatus.PENDING,
+                ReportStatus.ACKNOWLEDGED,
+                ReportStatus.IN_PROGRESS
+            ]))
+            .order_by(desc(Report.urgency_level), desc(Report.created_at))
+            .limit(10)
+        )
+        reports = result.scalars().all()
+    
+    if not reports:
+        await update.message.reply_text(get_text("no_assigned_reports", lang))
+        return
+    
+    # Format reports list
+    text = get_text("assigned_reports_title", lang) + "\n\n"
+    keyboard = []
+    
+    for report in reports:
+        # Add report details to text
+        text += get_text("report_details", lang).format(
+            report_id=report.public_id,
+            location=report.city or report.address or get_text("location_unknown", lang),
+            urgency=get_text(f"urgency_{report.urgency_level.value}", lang),
+            animal_type=get_text(f"animal_{report.animal_type.value}", lang),
+            status=get_text(f"status_{report.status.value}", lang),
+            created_at=report.created_at.strftime("%d/%m %H:%M")
+        ) + "\n\n"
+        
+        # Add action button
+        keyboard.append([InlineKeyboardButton(
+            f"#{report.public_id} - {get_text('select_report_action', lang)}",
+            callback_data=f"org_report_{report.public_id}"
+        )])
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text(text, reply_markup=reply_markup)
+
+
+async def handle_org_report_action(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle organization report action selection."""
+    query = update.callback_query
+    await query.answer()
+    
+    lang = get_user_language(context)
+    report_id = query.data.replace("org_report_", "")
+    
+    keyboard = [
+        [InlineKeyboardButton(
+            get_text("acknowledge_report", lang),
+            callback_data=f"org_ack_{report_id}"
+        )],
+        [InlineKeyboardButton(
+            get_text("update_report_status", lang),
+            callback_data=f"org_status_{report_id}"
+        )],
+        [InlineKeyboardButton(
+            get_text("view_full_details", lang),
+            callback_data=f"org_details_{report_id}"
+        )],
+        [InlineKeyboardButton(
+            get_text("back", lang),
+            callback_data="org_reports_list"
+        )]
+    ]
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await query.edit_message_text(
+        get_text("select_report_action", lang),
+        reply_markup=reply_markup
+    )
+
+
+async def handle_org_acknowledge_report(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle report acknowledgement by organization."""
+    query = update.callback_query
+    await query.answer()
+    
+    lang = get_user_language(context)
+    report_id = query.data.replace("org_ack_", "")
+    
+    # Update report status
+    async with async_session_maker() as session:
+        from sqlalchemy import select
+        
+        result = await session.execute(
+            select(Report).where(Report.public_id == report_id)
+        )
+        report = result.scalar_one_or_none()
+        
+        if report and report.status in [ReportStatus.SUBMITTED, ReportStatus.PENDING]:
+            report.status = ReportStatus.ACKNOWLEDGED
+            report.first_response_at = datetime.now(timezone.utc)
+            await session.commit()
+            
+            await query.edit_message_text(
+                get_text("acknowledge_success", lang).format(report_id=report_id)
+            )
+        else:
+            await query.edit_message_text(
+                get_text("operation_failed", lang)
+            )
+
+
+async def handle_org_update_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle report status update by organization."""
+    query = update.callback_query
+    await query.answer()
+    
+    lang = get_user_language(context)
+    report_id = query.data.replace("org_status_", "")
+    
+    # Show status options
+    keyboard = [
+        [InlineKeyboardButton(
+            get_text("status_acknowledged_desc", lang),
+            callback_data=f"set_status_{report_id}_acknowledged"
+        )],
+        [InlineKeyboardButton(
+            get_text("status_in_progress_desc", lang),
+            callback_data=f"set_status_{report_id}_in_progress"
+        )],
+        [InlineKeyboardButton(
+            get_text("status_resolved_desc", lang),
+            callback_data=f"set_status_{report_id}_resolved"
+        )],
+        [InlineKeyboardButton(
+            get_text("status_closed_desc", lang),
+            callback_data=f"set_status_{report_id}_closed"
+        )],
+        [InlineKeyboardButton(
+            get_text("back", lang),
+            callback_data=f"org_report_{report_id}"
+        )]
+    ]
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await query.edit_message_text(
+        get_text("select_new_status", lang).format(report_id=report_id),
+        reply_markup=reply_markup
+    )
+
+
+async def handle_set_report_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Set report status."""
+    query = update.callback_query
+    await query.answer()
+    
+    lang = get_user_language(context)
+    parts = query.data.split("_")
+    report_id = parts[2]
+    new_status = parts[3]
+    
+    # Update status in database
+    async with async_session_maker() as session:
+        from sqlalchemy import select
+        
+        result = await session.execute(
+            select(Report).where(Report.public_id == report_id)
+        )
+        report = result.scalar_one_or_none()
+        
+        if report:
+            # Map status string to enum
+            status_map = {
+                "acknowledged": ReportStatus.ACKNOWLEDGED,
+                "in_progress": ReportStatus.IN_PROGRESS,
+                "resolved": ReportStatus.RESOLVED,
+                "closed": ReportStatus.CLOSED
+            }
+            
+            report.status = status_map.get(new_status, report.status)
+            
+            if new_status == "resolved":
+                report.resolved_at = datetime.now(timezone.utc)
+            
+            await session.commit()
+            
+            await query.edit_message_text(
+                get_text("status_updated", lang).format(
+                    report_id=report_id,
+                    status=get_text(f"status_{new_status}", lang)
+                )
+            )
+        else:
+            await query.edit_message_text(get_text("operation_failed", lang))
+
+
+async def show_org_statistics(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show organization statistics."""
+    lang = get_user_language(context)
+    user = update.effective_user
+    
+    # Get user and check permissions
+    db_user = await get_or_create_user(user)
+    
+    if db_user.role not in [UserRole.ORG_STAFF, UserRole.ORG_ADMIN]:
+        await update.message.reply_text(get_text("permission_denied", lang))
+        return
+    
+    if not db_user.organization_id:
+        await update.message.reply_text(get_text("no_organization", lang))
+        return
+    
+    # Get organization statistics
+    async with async_session_maker() as session:
+        from sqlalchemy import select, func
+        
+        # Get organization
+        org = await session.get(Organization, db_user.organization_id)
+        
+        if not org:
+            await update.message.reply_text(get_text("no_organization", lang))
+            return
+        
+        # Count reports by status
+        pending_count = await session.scalar(
+            select(func.count(Report.id))
+            .where(Report.assigned_organization_id == org.id)
+            .where(Report.status.in_([ReportStatus.PENDING, ReportStatus.ACKNOWLEDGED]))
+        )
+        
+        in_progress_count = await session.scalar(
+            select(func.count(Report.id))
+            .where(Report.assigned_organization_id == org.id)
+            .where(Report.status == ReportStatus.IN_PROGRESS)
+        )
+        
+        # Count this month
+        from datetime import datetime, timedelta
+        month_start = datetime.now(timezone.utc).replace(day=1, hour=0, minute=0, second=0)
+        
+        month_count = await session.scalar(
+            select(func.count(Report.id))
+            .where(Report.assigned_organization_id == org.id)
+            .where(Report.created_at >= month_start)
+        )
+        
+        # Count this week
+        week_start = datetime.now(timezone.utc) - timedelta(days=7)
+        
+        week_count = await session.scalar(
+            select(func.count(Report.id))
+            .where(Report.assigned_organization_id == org.id)
+            .where(Report.created_at >= week_start)
+        )
+    
+    # Format statistics
+    text = get_text("org_stats_title", lang).format(org_name=org.name) + "\n\n"
+    text += get_text("stats_total_handled", lang).format(count=org.total_reports_handled) + "\n"
+    text += get_text("stats_successful", lang).format(count=org.successful_rescues) + "\n"
+    
+    if org.average_response_time_minutes:
+        text += get_text("stats_avg_response", lang).format(time=int(org.average_response_time_minutes)) + "\n"
+    
+    text += "\n"
+    text += get_text("stats_pending", lang).format(count=pending_count) + "\n"
+    text += get_text("stats_in_progress", lang).format(count=in_progress_count) + "\n"
+    text += get_text("stats_this_month", lang).format(count=month_count) + "\n"
+    text += get_text("stats_this_week", lang).format(count=week_count) + "\n"
+    
+    await update.message.reply_text(text)
+
+
+# =============================================================================
+# Admin Handlers
+# =============================================================================
+
+async def show_admin_users_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show admin users management menu."""
+    lang = get_user_language(context)
+    user = update.effective_user
+    
+    # Check admin permission
+    db_user = await get_or_create_user(user)
+    if db_user.role != UserRole.SYSTEM_ADMIN:
+        await update.message.reply_text(get_text("permission_denied", lang))
+        return
+    
+    keyboard = [
+        [InlineKeyboardButton(
+            get_text("search_user", lang),
+            callback_data="admin_search_user"
+        )],
+        [InlineKeyboardButton(
+            get_text("view_all_users", lang),
+            callback_data="admin_list_users"
+        )],
+        [InlineKeyboardButton(
+            get_text("user_roles_management", lang),
+            callback_data="admin_manage_roles"
+        )],
+        [InlineKeyboardButton(
+            get_text("blocked_users", lang),
+            callback_data="admin_blocked_users"
+        )]
+    ]
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text(
+        get_text("users_management_title", lang),
+        reply_markup=reply_markup
+    )
+
+
+async def show_admin_orgs_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show admin organizations management menu."""
+    lang = get_user_language(context)
+    user = update.effective_user
+    
+    # Check admin permission
+    db_user = await get_or_create_user(user)
+    if db_user.role != UserRole.SYSTEM_ADMIN:
+        await update.message.reply_text(get_text("permission_denied", lang))
+        return
+    
+    keyboard = [
+        [InlineKeyboardButton(
+            get_text("pending_org_approvals", lang),
+            callback_data="admin_pending_orgs"
+        )],
+        [InlineKeyboardButton(
+            get_text("active_organizations", lang),
+            callback_data="admin_active_orgs"
+        )],
+        [InlineKeyboardButton(
+            get_text("add_organization", lang),
+            callback_data="admin_add_org"
+        )],
+        [InlineKeyboardButton(
+            get_text("org_performance", lang),
+            callback_data="admin_org_performance"
+        )]
+    ]
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text(
+        get_text("orgs_management_title", lang),
+        reply_markup=reply_markup
+    )
+
+
+async def show_admin_reports_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show admin system reports menu."""
+    lang = get_user_language(context)
+    user = update.effective_user
+    
+    # Check admin permission
+    db_user = await get_or_create_user(user)
+    if db_user.role != UserRole.SYSTEM_ADMIN:
+        await update.message.reply_text(get_text("permission_denied", lang))
+        return
+    
+    # Get system statistics
+    async with async_session_maker() as session:
+        from sqlalchemy import select, func
+        from datetime import datetime, timedelta
+        
+        # Today's reports
+        today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0)
+        today_count = await session.scalar(
+            select(func.count(Report.id))
+            .where(Report.created_at >= today_start)
+        )
+        
+        # This week
+        week_start = datetime.now(timezone.utc) - timedelta(days=7)
+        week_count = await session.scalar(
+            select(func.count(Report.id))
+            .where(Report.created_at >= week_start)
+        )
+        
+        # This month
+        month_start = datetime.now(timezone.utc).replace(day=1, hour=0, minute=0, second=0)
+        month_count = await session.scalar(
+            select(func.count(Report.id))
+            .where(Report.created_at >= month_start)
+        )
+        
+        # Resolved count
+        resolved_count = await session.scalar(
+            select(func.count(Report.id))
+            .where(Report.status == ReportStatus.RESOLVED)
+            .where(Report.created_at >= month_start)
+        )
+        
+        # Pending count
+        pending_count = await session.scalar(
+            select(func.count(Report.id))
+            .where(Report.status.in_([ReportStatus.PENDING, ReportStatus.ACKNOWLEDGED]))
+        )
+    
+    text = get_text("reports_summary", lang).format(
+        today=today_count,
+        week=week_count,
+        month=month_count,
+        resolved=resolved_count,
+        pending=pending_count
+    )
+    
+    keyboard = [
+        [InlineKeyboardButton(
+            get_text("daily_summary", lang),
+            callback_data="admin_daily_report"
+        )],
+        [InlineKeyboardButton(
+            get_text("weekly_report", lang),
+            callback_data="admin_weekly_report"
+        )],
+        [InlineKeyboardButton(
+            get_text("monthly_statistics", lang),
+            callback_data="admin_monthly_stats"
+        )],
+        [InlineKeyboardButton(
+            get_text("export_data", lang),
+            callback_data="admin_export_data"
+        )]
+    ]
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text(text, reply_markup=reply_markup)
+
+
+async def show_admin_settings_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show admin system settings menu."""
+    lang = get_user_language(context)
+    user = update.effective_user
+    
+    # Check admin permission
+    db_user = await get_or_create_user(user)
+    if db_user.role != UserRole.SYSTEM_ADMIN:
+        await update.message.reply_text(get_text("permission_denied", lang))
+        return
+    
+    keyboard = [
+        [InlineKeyboardButton(
+            get_text("maintenance_mode", lang),
+            callback_data="admin_maintenance"
+        )],
+        [InlineKeyboardButton(
+            get_text("broadcast_message", lang),
+            callback_data="admin_broadcast"
+        )],
+        [InlineKeyboardButton(
+            get_text("system_logs", lang),
+            callback_data="admin_logs"
+        )],
+        [InlineKeyboardButton(
+            get_text("backup_restore", lang),
+            callback_data="admin_backup"
+        )]
+    ]
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text(
+        get_text("system_settings_title", lang),
+        reply_markup=reply_markup
+    )
+
+
+# =============================================================================
 # Language Selection Handlers
 # =============================================================================
 
@@ -1190,6 +2078,43 @@ def create_bot_application() -> Application:
         handle_language_selection, pattern="^set_lang_.*$"
     ))
     
+    # User Settings handlers
+    application.add_handler(CallbackQueryHandler(
+        handle_service_area_settings, pattern="settings_service_area"
+    ))
+    application.add_handler(CallbackQueryHandler(
+        handle_notification_settings, pattern="settings_notifications"
+    ))
+    application.add_handler(CallbackQueryHandler(
+        handle_contact_details_settings, pattern="settings_contact"
+    ))
+    application.add_handler(CallbackQueryHandler(
+        handle_service_radius_selection, pattern="service_radius_.*"
+    ))
+    application.add_handler(CallbackQueryHandler(
+        handle_notification_category, pattern="notif_category_.*"
+    ))
+    application.add_handler(CallbackQueryHandler(
+        handle_notification_toggle, pattern="toggle_notif_.*"
+    ))
+    application.add_handler(CallbackQueryHandler(
+        show_user_settings_menu, pattern="settings_menu"
+    ))
+    
+    # Organization handlers
+    application.add_handler(CallbackQueryHandler(
+        handle_org_report_action, pattern="org_report_.*"
+    ))
+    application.add_handler(CallbackQueryHandler(
+        handle_org_acknowledge_report, pattern="org_ack_.*"
+    ))
+    application.add_handler(CallbackQueryHandler(
+        handle_org_update_status, pattern="org_status_.*"
+    ))
+    application.add_handler(CallbackQueryHandler(
+        handle_set_report_status, pattern="set_status_.*"
+    ))
+    
     # Add message handlers
     application.add_handler(MessageHandler(
         filters.Text(["עזרה", "Help", "مساعدة"]), 
@@ -1202,6 +2127,44 @@ def create_bot_application() -> Application:
     application.add_handler(MessageHandler(
         filters.Text(["שינוי שפה", "Change Language", "تغيير اللغة"]),
         show_language_menu
+    ))
+    application.add_handler(MessageHandler(
+        filters.Text(["⚙️ הגדרות", "Settings"]),
+        show_user_settings_menu
+    ))
+    
+    # Organization message handlers
+    application.add_handler(MessageHandler(
+        filters.Text(["📥 דיווחים שהוקצו לי"]),
+        show_assigned_reports
+    ))
+    application.add_handler(MessageHandler(
+        filters.Text(["📈 סטטיסטיקות הארגון"]),
+        show_org_statistics
+    ))
+    
+    # Admin message handlers
+    application.add_handler(MessageHandler(
+        filters.Text(["👥 ניהול משתמשים"]),
+        show_admin_users_menu
+    ))
+    application.add_handler(MessageHandler(
+        filters.Text(["🏢 ניהול ארגונים"]),
+        show_admin_orgs_menu
+    ))
+    application.add_handler(MessageHandler(
+        filters.Text(["📊 דוחות מערכת"]),
+        show_admin_reports_menu
+    ))
+    application.add_handler(MessageHandler(
+        filters.Text(["🔧 הגדרות מערכת"]),
+        show_admin_settings_menu
+    ))
+    
+    # Handle location messages for service area setup
+    application.add_handler(MessageHandler(
+        filters.LOCATION,
+        handle_service_area_location
     ))
     
     # Error handler

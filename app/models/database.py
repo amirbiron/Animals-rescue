@@ -193,6 +193,214 @@ class UUIDMixin:
 # User Management Models
 # =============================================================================
 
+class UserSettings(Base, UUIDMixin, TimestampMixin):
+    """
+    User settings and preferences model.
+    
+    Stores notification preferences, service areas, and contact details.
+    """
+    
+    __tablename__ = "user_settings"
+    
+    # User reference
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        unique=True,
+        nullable=False,
+        doc="Associated user"
+    )
+    
+    # Service area preferences
+    service_area_enabled: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        nullable=False,
+        doc="Whether location-based alerts are enabled"
+    )
+    
+    service_area_radius_km: Mapped[Optional[float]] = mapped_column(
+        Float,
+        nullable=True,
+        doc="Service area radius in kilometers"
+    )
+    
+    service_area_latitude: Mapped[Optional[float]] = mapped_column(
+        Float,
+        nullable=True,
+        doc="Service area center latitude"
+    )
+    
+    service_area_longitude: Mapped[Optional[float]] = mapped_column(
+        Float,
+        nullable=True,
+        doc="Service area center longitude"
+    )
+    
+    # Notification preferences - My Reports
+    notif_status_updates: Mapped[bool] = mapped_column(
+        Boolean,
+        default=True,
+        nullable=False,
+        doc="Notifications for report status updates"
+    )
+    
+    notif_org_messages: Mapped[bool] = mapped_column(
+        Boolean,
+        default=True,
+        nullable=False,
+        doc="Messages from handling organization"
+    )
+    
+    notif_info_requests: Mapped[bool] = mapped_column(
+        Boolean,
+        default=True,
+        nullable=False,
+        doc="Requests for additional information"
+    )
+    
+    # Notification preferences - Area Reports
+    notif_new_nearby: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        nullable=False,
+        doc="New reports in area"
+    )
+    
+    notif_urgent_nearby: Mapped[bool] = mapped_column(
+        Boolean,
+        default=True,
+        nullable=False,
+        doc="Urgent reports in area"
+    )
+    
+    notif_help_requests: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        nullable=False,
+        doc="Help requests from organizations"
+    )
+    
+    # Notification preferences - System
+    notif_admin_messages: Mapped[bool] = mapped_column(
+        Boolean,
+        default=True,
+        nullable=False,
+        doc="Admin announcements"
+    )
+    
+    notif_updates_news: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        nullable=False,
+        doc="System updates and news"
+    )
+    
+    notif_reminders: Mapped[bool] = mapped_column(
+        Boolean,
+        default=True,
+        nullable=False,
+        doc="Action reminders"
+    )
+    
+    # Notification preferences - Organization (for org staff)
+    notif_new_assigned: Mapped[bool] = mapped_column(
+        Boolean,
+        default=True,
+        nullable=False,
+        doc="New reports assigned to organization"
+    )
+    
+    notif_pending_reminders: Mapped[bool] = mapped_column(
+        Boolean,
+        default=True,
+        nullable=False,
+        doc="Reminders for pending reports"
+    )
+    
+    notif_performance_updates: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        nullable=False,
+        doc="Organization performance updates"
+    )
+    
+    # Quiet hours
+    quiet_hours_enabled: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        nullable=False,
+        doc="Whether quiet hours are enabled"
+    )
+    
+    quiet_hours_start: Mapped[Optional[str]] = mapped_column(
+        String(5),
+        nullable=True,
+        doc="Quiet hours start time (HH:MM)"
+    )
+    
+    quiet_hours_end: Mapped[Optional[str]] = mapped_column(
+        String(5),
+        nullable=True,
+        doc="Quiet hours end time (HH:MM)"
+    )
+    
+    # Additional contact details
+    secondary_phone: Mapped[Optional[str]] = mapped_column(
+        String(20),
+        nullable=True,
+        doc="Secondary phone number"
+    )
+    
+    secondary_email: Mapped[Optional[str]] = mapped_column(
+        String(255),
+        nullable=True,
+        doc="Secondary email address"
+    )
+    
+    emergency_contact_name: Mapped[Optional[str]] = mapped_column(
+        String(255),
+        nullable=True,
+        doc="Emergency contact name"
+    )
+    
+    emergency_contact_phone: Mapped[Optional[str]] = mapped_column(
+        String(20),
+        nullable=True,
+        doc="Emergency contact phone"
+    )
+    
+    availability_hours: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True,
+        doc="Availability hours description"
+    )
+    
+    # Notification delivery preferences
+    preferred_contact_method: Mapped[str] = mapped_column(
+        String(20),
+        default="telegram",
+        nullable=False,
+        doc="Preferred contact method (telegram/email/sms)"
+    )
+    
+    # Relationships
+    user: Mapped["User"] = relationship(
+        "User",
+        back_populates="settings",
+        foreign_keys=[user_id]
+    )
+    
+    # Table constraints
+    __table_args__ = (
+        CheckConstraint(
+            "service_area_radius_km IS NULL OR service_area_radius_km > 0",
+            name="check_service_radius_positive"
+        ),
+        Index("ix_user_settings_user_id", "user_id"),
+    )
+
+
 class User(Base, UUIDMixin, TimestampMixin):
     """
     User model for authentication and authorization.
@@ -323,6 +531,13 @@ class User(Base, UUIDMixin, TimestampMixin):
     reports: Mapped[List["Report"]] = relationship(
         "Report", 
         back_populates="reporter"
+    )
+    
+    settings: Mapped[Optional["UserSettings"]] = relationship(
+        "UserSettings",
+        back_populates="user",
+        uselist=False,
+        cascade="all, delete-orphan"
     )
     
     # Table constraints
@@ -1439,11 +1654,16 @@ async def check_database_health() -> Dict[str, Any]:
 __all__ = [
     "Base",
     "User",
+    "UserSettings",
     "Organization", 
     "Report",
     "ReportFile",
     "Alert",
     "Event",
+    "UserRole",
+    "ReportStatus",
+    "AnimalType",
+    "UrgencyLevel",
     "engine",
     "async_session_maker",
     "get_db_session",
