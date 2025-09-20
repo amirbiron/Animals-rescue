@@ -28,7 +28,7 @@ from app.core.cache import redis_client, redis_queue_sync
 from app.models.database import (
     async_session_maker, User, Organization, Report, Alert, Event,
     ReportStatus, AlertStatus, AlertChannel, EventType, UrgencyLevel,
-    AnimalType, OrganizationType
+    AnimalType, OrganizationType, create_point_from_coordinates
 )
 from app.services.google import GoogleService
 from app.services.nlp import NLPService
@@ -847,6 +847,57 @@ async def _cleanup_old_data_async() -> Dict[str, int]:
     return results
 
 
+@job("maintenance", timeout="20m", connection=redis_queue_sync)
+def geocode_organizations_missing_coords(batch_size: int = 200) -> Dict[str, Any]:
+    """Geocode organizations that have textual address but missing coordinates."""
+    logger.info("Geocoding organizations with missing coordinates", batch_size=batch_size)
+    try:
+        return asyncio.run(_geocode_orgs_missing_async(batch_size))
+    except Exception as e:
+        logger.error("Geocode organizations job failed", error=str(e))
+        raise
+
+
+async def _geocode_orgs_missing_async(batch_size: int) -> Dict[str, Any]:
+    results = {"processed": 0, "updated": 0, "skipped": 0, "errors": 0}
+    async with async_session_maker() as session:
+        # Fetch a batch
+        result = await session.execute(
+            select(Organization)
+            .where(
+                and_(
+                    Organization.address.isnot(None),
+                    or_(Organization.latitude.is_(None), Organization.longitude.is_(None))
+                )
+            )
+            .limit(batch_size)
+        )
+        orgs = result.scalars().all()
+        for org in orgs:
+            results["processed"] += 1
+            try:
+                geo = await google_service.geocode(org.address or org.name or "")
+                if not geo:
+                    results["skipped"] += 1
+                    continue
+                org.latitude = geo.get("latitude")
+                org.longitude = geo.get("longitude")
+                # Set PostGIS geometry if available
+                if org.latitude and org.longitude:
+                    try:
+                        org.location = create_point_from_coordinates(org.latitude, org.longitude)
+                    except Exception:
+                        pass
+                results["updated"] += 1
+                # Respect rate limits
+                await asyncio.sleep(0.1)
+            except Exception as e:
+                results["errors"] += 1
+                logger.warning("Failed to geocode organization", org_id=str(org.id), error=str(e))
+        await session.commit()
+    logger.info("Geocode organizations completed", results=results)
+    return results
+
 @job("maintenance", timeout="10m", connection=redis_queue_sync)
 def update_organization_stats() -> Dict[str, int]:
     """Update organization response statistics."""
@@ -1270,4 +1321,5 @@ __all__ = [
     "send_test_alert",
     "generate_daily_statistics",
     "schedule_recurring_jobs",
+    "geocode_organizations_missing_coords",
 ]

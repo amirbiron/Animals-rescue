@@ -2335,6 +2335,9 @@ async def show_admin_orgs_menu(update: Update, context: ContextTypes.DEFAULT_TYP
             "🗺️ ניהול ערי ייבוא", callback_data="admin_import_cities"
         )],
         [InlineKeyboardButton(
+            "🧭 העשרת כתובות (Geocoding)", callback_data="admin_geocode_orgs"
+        )],
+        [InlineKeyboardButton(
             get_text("org_performance", lang),
             callback_data="admin_org_performance"
         )]
@@ -3257,6 +3260,7 @@ def create_bot_application() -> Application:
     application.add_handler(CallbackQueryHandler(handle_admin_import_cities_add, pattern="admin_import_cities_add"))
     application.add_handler(CallbackQueryHandler(handle_admin_import_cities_remove, pattern="admin_import_cities_remove"))
     application.add_handler(CallbackQueryHandler(handle_admin_import_cities_run, pattern="admin_import_cities_run"))
+    application.add_handler(CallbackQueryHandler(handle_admin_geocode_orgs, pattern="admin_geocode_orgs"))
     application.add_handler(CallbackQueryHandler(handle_admin_org_performance, pattern="admin_org_performance"))
     application.add_handler(CallbackQueryHandler(handle_admin_daily_report, pattern="admin_daily_report"))
     application.add_handler(CallbackQueryHandler(handle_admin_weekly_report, pattern="admin_weekly_report"))
