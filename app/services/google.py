@@ -577,6 +577,73 @@ class GoogleService:
                 continue
         logger.info("Animal shelters search completed", city=city, total_results=len(all_results))
         return all_results
+
+    async def search_veterinary_nearby(
+        self,
+        location: Tuple[float, float],
+        radius: int = 15000,
+        language: str = "he",
+    ) -> List[Dict[str, Any]]:
+        """Search for veterinary clinics near coordinates."""
+        all_results: List[Dict[str, Any]] = []
+        seen_place_ids: set[str] = set()
+        for term in ["veterinary clinic", "וטרינר", "מרפאה וטרינרית", "vet"]:
+            try:
+                results = await self.search_places(
+                    query=term,
+                    location=location,
+                    radius=radius,
+                    place_type="veterinary_care",
+                    language=language,
+                )
+                for result in results:
+                    place_id = result.get("place_id")
+                    if place_id and place_id not in seen_place_ids:
+                        types = result.get("types", [])
+                        name = (result.get("name") or "").lower()
+                        if (
+                            any(vet_type in types for vet_type in ["veterinary_care", "hospital"]) or
+                            any(keyword in name for keyword in ["vet", "וטרינר", "מרפאה", "hospital"])):
+                            all_results.append(result)
+                            seen_place_ids.add(place_id)
+                await asyncio.sleep(0.2)
+            except Exception as e:
+                logger.warning("Veterinary nearby search failed", error=str(e))
+                continue
+        return all_results
+
+    async def search_shelters_nearby(
+        self,
+        location: Tuple[float, float],
+        radius: int = 15000,
+        language: str = "he",
+    ) -> List[Dict[str, Any]]:
+        """Search for animal shelters and rescues near coordinates."""
+        all_results: List[Dict[str, Any]] = []
+        seen_place_ids: set[str] = set()
+        for term in ["animal shelter", "pet rescue", "עמותת בעלי חיים", "מקלט לבעלי חיים"]:
+            try:
+                results = await self.search_places(
+                    query=term,
+                    location=location,
+                    radius=radius,
+                    language=language,
+                )
+                for result in results:
+                    place_id = result.get("place_id")
+                    if place_id and place_id not in seen_place_ids:
+                        types = result.get("types", [])
+                        name = (result.get("name") or "").lower()
+                        if (
+                            any(k in name for k in ["shelter", "rescue", "עמותה", "מקלט"]) or
+                            any(t in types for t in ["animal_shelter"])):
+                            all_results.append(result)
+                            seen_place_ids.add(place_id)
+                await asyncio.sleep(0.2)
+            except Exception as e:
+                logger.warning("Shelter nearby search failed", error=str(e))
+                continue
+        return all_results
     
     # =========================================================================
     # Geocoding API Integration

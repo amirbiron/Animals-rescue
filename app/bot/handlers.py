@@ -2329,6 +2329,12 @@ async def show_admin_orgs_menu(update: Update, context: ContextTypes.DEFAULT_TYP
             "🔎 ייבוא מגוגל לפי עיר", callback_data="admin_import_google"
         )],
         [InlineKeyboardButton(
+            "📍 ייבוא לפי מיקום", callback_data="admin_import_location"
+        )],
+        [InlineKeyboardButton(
+            "🗺️ ניהול ערי ייבוא", callback_data="admin_import_cities"
+        )],
+        [InlineKeyboardButton(
             get_text("org_performance", lang),
             callback_data="admin_org_performance"
         )]
@@ -2390,6 +2396,87 @@ async def handle_admin_import_google(update: Update, context: ContextTypes.DEFAU
     lang = get_user_language(context)
     context.user_data["awaiting_google_city"] = True
     await query.edit_message_text("הכנס שם עיר לייבוא קליניקות ומקלטים (באנגלית/עברית)")
+
+
+async def handle_admin_import_location(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    lang = get_user_language(context)
+    context.user_data["awaiting_import_location"] = True
+    keyboard = [
+        [KeyboardButton(get_text("share_location", lang), request_location=True)],
+        [KeyboardButton("רדיוס 5 ק""מ"), KeyboardButton("רדיוס 10 ק""מ")],
+        [KeyboardButton("רדיוס 20 ק""מ"), KeyboardButton("רדיוס 50 ק""מ")],
+    ]
+    await query.edit_message_text("שלח מיקום GPS ובחר רדיוס (5/10/20/50 ק""מ)")
+    await query.message.reply_text("בחר רדיוס:", reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True))
+
+
+async def handle_admin_import_location_inputs(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Collect location and radius, then import nearby orgs."""
+    if not context.user_data.get("awaiting_import_location"):
+        return
+    lang = get_user_language(context)
+    # Determine radius selection
+    text = (getattr(update, 'message', None) and update.message.text or '')
+    radius_map = {
+        "רדיוס 5 ק""מ": 5000,
+        "רדיוס 10 ק""מ": 10000,
+        "רדיוס 20 ק""מ": 20000,
+        "רדיוס 50 ק""מ": 50000,
+    }
+    if text in radius_map:
+        context.user_data["import_radius_m"] = radius_map[text]
+        await update.message.reply_text("עכשיו שלח את המיקום שלך (כפתור 'שתף מיקום')")
+        return
+    if getattr(update, 'message', None) and update.message.location:
+        loc = update.message.location
+        radius = int(context.user_data.get("import_radius_m", 10000))
+        from app.services.google import GoogleService
+        google = GoogleService()
+        created = 0
+        try:
+            async with google:
+                clinics = await google.search_veterinary_nearby((loc.latitude, loc.longitude), radius=radius)
+                shelters = await google.search_shelters_nearby((loc.latitude, loc.longitude), radius=radius)
+            places = clinics + shelters
+            async with async_session_maker() as session:
+                from sqlalchemy import select
+                for place in places:
+                    exists = await session.execute(select(Organization).where(Organization.google_place_id == place["place_id"]))
+                    if exists.scalar_one_or_none():
+                        continue
+                    org_type = (
+                        OrganizationType.ANIMAL_SHELTER
+                        if any(k in (place.get("name") or "").lower() for k in ["shelter", "rescue", "עמותה", "מקלט"]) else
+                        OrganizationType.VET_CLINIC
+                    )
+                    org = Organization(
+                        name=place["name"],
+                        organization_type=org_type,
+                        primary_phone=place.get("phone"),
+                        address=place.get("address"),
+                        city=None,
+                        latitude=place.get("latitude"),
+                        longitude=place.get("longitude"),
+                        google_place_id=place["place_id"],
+                        is_active=True,
+                        is_verified=False,
+                    )
+                    session.add(org)
+                    created += 1
+                await session.commit()
+        except Exception as e:
+            await update.message.reply_text(f"שגיאה בייבוא: {e}")
+            context.user_data.pop("awaiting_import_location", None)
+            context.user_data.pop("import_radius_m", None)
+            return
+        context.user_data.pop("awaiting_import_location", None)
+        context.user_data.pop("import_radius_m", None)
+        await update.message.reply_text(
+            f"ייבוא לפי מיקום הושלם. נוספו {created} ארגונים חדשים ברדיוס {int(radius/1000)} ק""מ.",
+            reply_markup=ReplyKeyboardRemove()
+        )
 
 
 async def handle_admin_import_google_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -3165,6 +3252,11 @@ def create_bot_application() -> Application:
     application.add_handler(CallbackQueryHandler(handle_admin_add_org, pattern="admin_add_org"))
     application.add_handler(CallbackQueryHandler(handle_admin_add_org_type, pattern="admin_add_org_type_.*"))
     application.add_handler(CallbackQueryHandler(handle_admin_import_google, pattern="admin_import_google"))
+    application.add_handler(CallbackQueryHandler(handle_admin_import_location, pattern="admin_import_location"))
+    application.add_handler(CallbackQueryHandler(handle_admin_manage_import_cities, pattern="admin_import_cities"))
+    application.add_handler(CallbackQueryHandler(handle_admin_import_cities_add, pattern="admin_import_cities_add"))
+    application.add_handler(CallbackQueryHandler(handle_admin_import_cities_remove, pattern="admin_import_cities_remove"))
+    application.add_handler(CallbackQueryHandler(handle_admin_import_cities_run, pattern="admin_import_cities_run"))
     application.add_handler(CallbackQueryHandler(handle_admin_org_performance, pattern="admin_org_performance"))
     application.add_handler(CallbackQueryHandler(handle_admin_daily_report, pattern="admin_daily_report"))
     application.add_handler(CallbackQueryHandler(handle_admin_weekly_report, pattern="admin_weekly_report"))
@@ -3211,6 +3303,14 @@ def create_bot_application() -> Application:
     application.add_handler(MessageHandler(
         filters.TEXT & ~filters.COMMAND,
         handle_admin_import_google_input
+    ))
+    application.add_handler(MessageHandler(
+        (filters.TEXT | filters.LOCATION) & ~filters.COMMAND,
+        handle_admin_import_location_inputs
+    ))
+    application.add_handler(MessageHandler(
+        filters.TEXT & ~filters.COMMAND,
+        handle_admin_import_cities_inputs
     ))
     
     # Error handler

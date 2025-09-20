@@ -997,8 +997,16 @@ async def _sync_google_places_data_async() -> Dict[str, Any]:
                 results["errors"].append(error_msg)
                 logger.warning("Organization sync failed", org_id=str(org.id), error=str(e))
         
-        # Search for new veterinary clinics and shelters in major cities
-        cities = ["Tel Aviv", "Jerusalem", "Haifa", "Rishon LeZion", "Petah Tikva"]
+        # Search for new veterinary clinics and shelters in configured cities (Redis) or defaults
+        try:
+            cities_raw = await redis_client.get("import:cities")
+            if cities_raw:
+                import json as _json
+                cities = _json.loads(cities_raw)
+            else:
+                cities = ["Tel Aviv", "Jerusalem", "Haifa", "Rishon LeZion", "Petah Tikva"]
+        except Exception:
+            cities = ["Tel Aviv", "Jerusalem", "Haifa", "Rishon LeZion", "Petah Tikva"]
         
         for city in cities:
             try:
