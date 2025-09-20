@@ -96,3 +96,9 @@ gunicorn==23.0.0                     # WSGI server for production
 GeoAlchemy2==0.18.0              # GIS support for PostgreSQL
 itsdangerous==2.2.0
 
+# =============================================================================
+# Testing (installed in CI/runtime for simplicity)
+# =============================================================================
+pytest==8.3.3
+pytest-asyncio==0.24.0
+

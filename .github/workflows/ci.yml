@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [ main, master ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Smoke import (no side effects)
+        env:
+          ENVIRONMENT: testing
+          TESTING: '1'
+          TELEGRAM_BOT_TOKEN: 'test-token'
+        run: |
+          python - <<'PY'
+          import importlib
+          import os
+          os.environ.setdefault('ENVIRONMENT','testing')
+          os.environ.setdefault('TESTING','1')
+          os.environ.setdefault('TELEGRAM_BOT_TOKEN','test-token')
+          importlib.import_module('app.main')
+          print('Imported app.main OK')
+          PY
+
+      - name: Run tests
+        env:
+          ENVIRONMENT: testing
+          TESTING: '1'
+          TELEGRAM_BOT_TOKEN: 'test-token'
+        run: |
+          pytest -q
+
