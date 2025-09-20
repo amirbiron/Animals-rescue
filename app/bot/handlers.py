@@ -3423,18 +3423,18 @@ async def handle_language_selection(update: Update, context: ContextTypes.DEFAUL
         ],
     ]
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=False)
-        # Build a friendly name with fallbacks if first_name is missing
-        _eu = update.effective_user
-        _name = (
-            getattr(_eu, "first_name", None)
-            or getattr(_eu, "full_name", None)
-            or getattr(_eu, "username", None)
-            or "משתמש"
-        )
-        welcome = get_text("welcome_message", lang_code).format(
-            name=_name,
-            app_name=settings.APP_NAME,
-        )
+    # Build a friendly name with fallbacks if first_name is missing
+    _eu = update.effective_user
+    _name = (
+        getattr(_eu, "first_name", None)
+        or getattr(_eu, "full_name", None)
+        or getattr(_eu, "username", None)
+        or "משתמש"
+    )
+    welcome = get_text("welcome_message", lang_code).format(
+        name=_name,
+        app_name=settings.APP_NAME,
+    )
     await query.message.reply_text(welcome, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
 
 
