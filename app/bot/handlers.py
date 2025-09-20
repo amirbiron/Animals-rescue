@@ -1279,6 +1279,105 @@ async def handle_notification_settings(update: Update, context: ContextTypes.DEF
     await query.edit_message_text(text, reply_markup=reply_markup)
 
 
+async def handle_quiet_hours_settings(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show and control quiet hours settings."""
+    query = update.callback_query
+    await query.answer()
+    lang = get_user_language(context)
+    
+    db_user = await get_or_create_user(update.effective_user)
+    user_settings = await get_or_create_user_settings(db_user.id)
+    
+    if user_settings.quiet_hours_enabled and user_settings.quiet_hours_start and user_settings.quiet_hours_end:
+        status_text = get_text("quiet_hours_enabled", lang).format(
+            start=user_settings.quiet_hours_start,
+            end=user_settings.quiet_hours_end,
+        )
+    else:
+        status_text = get_text("quiet_hours_disabled", lang)
+    
+    keyboard = [
+        [InlineKeyboardButton(get_text("set_quiet_hours", lang), callback_data="quiet_hours_set")],
+        [InlineKeyboardButton(get_text("disable_quiet_hours", lang), callback_data="quiet_hours_disable")],
+        [InlineKeyboardButton(get_text("back", lang), callback_data="settings_notifications")],
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    text = f"{get_text('quiet_hours_menu', lang)}\n\n{status_text}\n\n{get_text('quiet_hours_instructions', lang)}"
+    await query.edit_message_text(text, reply_markup=reply_markup)
+
+
+async def handle_quiet_hours_set(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Prompt user to enter quiet hours time range."""
+    query = update.callback_query
+    await query.answer()
+    lang = get_user_language(context)
+    context.user_data["awaiting_quiet_hours"] = True
+    keyboard = [[InlineKeyboardButton(get_text("back", lang), callback_data="settings_notifications")]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await query.edit_message_text(get_text("quiet_hours_instructions", lang), reply_markup=reply_markup)
+
+
+async def handle_quiet_hours_disable(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Disable quiet hours immediately."""
+    query = update.callback_query
+    await query.answer()
+    lang = get_user_language(context)
+    
+    db_user = await get_or_create_user(update.effective_user)
+    async with async_session_maker() as session:
+        from sqlalchemy import select
+        result = await session.execute(select(UserSettings).where(UserSettings.user_id == db_user.id))
+        user_settings = result.scalar_one_or_none()
+        if not user_settings:
+            user_settings = UserSettings(user_id=db_user.id)
+            session.add(user_settings)
+        user_settings.quiet_hours_enabled = False
+        user_settings.quiet_hours_start = None
+        user_settings.quiet_hours_end = None
+        await session.commit()
+    
+    await query.edit_message_text(get_text("quiet_hours_disabled", lang))
+
+
+async def handle_quiet_hours_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle user text input for quiet hours time range (e.g., 22:00-07:00)."""
+    if not context.user_data.get("awaiting_quiet_hours"):
+        return
+    lang = get_user_language(context)
+    text = (getattr(update, 'message', None) and update.message.text or '').strip()
+    match = re.match(r"^(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})$", text)
+    if not match:
+        await update.message.reply_text(get_text("quiet_hours_instructions", lang))
+        return
+    h1, m1, h2, m2 = map(int, match.groups())
+    if not (0 <= h1 <= 23 and 0 <= h2 <= 23 and 0 <= m1 <= 59 and 0 <= m2 <= 59):
+        await update.message.reply_text(get_text("quiet_hours_instructions", lang))
+        return
+    start_s = f"{h1:02d}:{m1:02d}"
+    end_s = f"{h2:02d}:{m2:02d}"
+    
+    db_user = await get_or_create_user(update.effective_user)
+    async with async_session_maker() as session:
+        from sqlalchemy import select
+        result = await session.execute(select(UserSettings).where(UserSettings.user_id == db_user.id))
+        user_settings = result.scalar_one_or_none()
+        if not user_settings:
+            user_settings = UserSettings(user_id=db_user.id)
+            session.add(user_settings)
+        user_settings.quiet_hours_enabled = True
+        user_settings.quiet_hours_start = start_s
+        user_settings.quiet_hours_end = end_s
+        await session.commit()
+    
+    context.user_data.pop("awaiting_quiet_hours", None)
+    keyboard = [[InlineKeyboardButton(get_text("back", lang), callback_data="settings_notifications")]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text(
+        get_text("quiet_hours_updated", lang).format(start=start_s, end=end_s),
+        reply_markup=reply_markup
+    )
+
+
 async def handle_notification_category(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle specific notification category settings."""
     query = update.callback_query
@@ -1370,8 +1469,7 @@ async def handle_notification_toggle(update: Update, context: ContextTypes.DEFAU
         
         await session.commit()
     
-    # Refresh the menu
-    # Determine which category we're in
+    # Refresh the menu without mutating CallbackQuery
     if setting_key in ["notif_status_updates", "notif_org_messages", "notif_info_requests"]:
         category = "my"
     elif setting_key in ["notif_new_nearby", "notif_urgent_nearby", "notif_help_requests"]:
@@ -1380,10 +1478,47 @@ async def handle_notification_toggle(update: Update, context: ContextTypes.DEFAU
         category = "system"
     else:
         category = "org"
-    
-    # Simulate the category selection to refresh menu
-    query.data = f"notif_category_{category}"
-    await handle_notification_category(update, context)
+    lang = get_user_language(context)
+    # Fetch current settings
+    db_user = await get_or_create_user(update.effective_user)
+    settings = await get_or_create_user_settings(db_user.id)
+    # Build the category menu
+    keyboard = []
+    if category == "my":
+        notifications = [
+            ("notif_status_updates", settings.notif_status_updates),
+            ("notif_org_messages", settings.notif_org_messages),
+            ("notif_info_requests", settings.notif_info_requests),
+        ]
+        menu_text = get_text("notif_my_reports_menu", lang)
+    elif category == "area":
+        notifications = [
+            ("notif_new_nearby", settings.notif_new_nearby),
+            ("notif_urgent_nearby", settings.notif_urgent_nearby),
+            ("notif_help_requests", settings.notif_help_requests),
+        ]
+        menu_text = get_text("notif_area_menu", lang)
+    elif category == "system":
+        notifications = [
+            ("notif_admin_messages", settings.notif_admin_messages),
+            ("notif_updates_news", settings.notif_updates_news),
+            ("notif_reminders", settings.notif_reminders),
+        ]
+        menu_text = get_text("notif_system_menu", lang)
+    else:
+        notifications = [
+            ("notif_new_assigned", settings.notif_new_assigned),
+            ("notif_pending_reminders", settings.notif_pending_reminders),
+            ("notif_performance_updates", settings.notif_performance_updates),
+        ]
+        menu_text = get_text("notif_org_menu", lang)
+    for notif_key, enabled in notifications:
+        icon = "✅" if enabled else "❌"
+        text = get_text(notif_key, lang)
+        keyboard.append([InlineKeyboardButton(f"{icon} {text}", callback_data=f"toggle_{notif_key}")])
+    keyboard.append([InlineKeyboardButton(get_text("back", lang), callback_data="settings_notifications")])
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await query.edit_message_text(menu_text, reply_markup=reply_markup)
 
 
 async def handle_contact_details_settings(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1427,6 +1562,82 @@ async def handle_contact_details_settings(update: Update, context: ContextTypes.
     
     reply_markup = InlineKeyboardMarkup(keyboard)
     await query.edit_message_text(text, reply_markup=reply_markup)
+
+
+async def handle_contact_update_phone(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Prompt user to update primary phone number."""
+    query = update.callback_query
+    await query.answer()
+    context.user_data["awaiting_phone"] = True
+    await query.edit_message_text("אנא שלחו מספר טלפון בפורמט תקין (לדוגמה: 050-1234567)")
+
+
+async def handle_contact_update_email(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Prompt user to update primary email address."""
+    query = update.callback_query
+    await query.answer()
+    context.user_data["awaiting_email"] = True
+    await query.edit_message_text("אנא שלחו כתובת אימייל תקינה (לדוגמה: name@example.com)")
+
+
+async def handle_contact_emergency(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Prompt user to update emergency contact phone."""
+    query = update.callback_query
+    await query.answer()
+    context.user_data["awaiting_emergency_phone"] = True
+    await query.edit_message_text("שלחו מספר טלפון של איש קשר לחירום")
+
+
+async def handle_phone_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle phone number input for various flows."""
+    text = (getattr(update, 'message', None) and update.message.text or '').strip()
+    if not any([
+        context.user_data.get("awaiting_phone"),
+        context.user_data.get("awaiting_emergency_phone"),
+    ]):
+        return
+    normalized = re.sub(r"[^\d+]", "", text)
+    if not re.match(r"^\+?\d{7,15}$", normalized):
+        await update.message.reply_text("מספר לא תקין. נסו שוב.")
+        return
+    db_user = await get_or_create_user(update.effective_user)
+    if context.user_data.get("awaiting_phone"):
+        async with async_session_maker() as session:
+            user = await session.get(User, db_user.id)
+            user.phone = normalized
+            await session.commit()
+        context.user_data.pop("awaiting_phone", None)
+        await update.message.reply_text("מספר הטלפון עודכן ✅")
+        return
+    if context.user_data.get("awaiting_emergency_phone"):
+        async with async_session_maker() as session:
+            from sqlalchemy import select
+            result = await session.execute(select(UserSettings).where(UserSettings.user_id == db_user.id))
+            user_settings = result.scalar_one_or_none()
+            if not user_settings:
+                user_settings = UserSettings(user_id=db_user.id)
+                session.add(user_settings)
+            user_settings.emergency_contact_phone = normalized
+            await session.commit()
+        context.user_data.pop("awaiting_emergency_phone", None)
+        await update.message.reply_text("איש קשר חירום עודכן ✅")
+
+
+async def handle_email_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle email address input for contact details."""
+    if not context.user_data.get("awaiting_email"):
+        return
+    text = (getattr(update, 'message', None) and update.message.text or '').strip()
+    if not re.match(r"^[^\s@]+@[^\s@]+\.[^\s@]+$", text):
+        await update.message.reply_text("אימייל לא תקין. נסו שוב.")
+        return
+    db_user = await get_or_create_user(update.effective_user)
+    async with async_session_maker() as session:
+        user = await session.get(User, db_user.id)
+        user.email = text
+        await session.commit()
+    context.user_data.pop("awaiting_email", None)
+    await update.message.reply_text("האימייל עודכן ✅")
 
 
 # =============================================================================
@@ -2098,7 +2309,28 @@ def create_bot_application() -> Application:
         handle_notification_toggle, pattern="toggle_notif_.*"
     ))
     application.add_handler(CallbackQueryHandler(
+        handle_quiet_hours_settings, pattern="notif_quiet_hours"
+    ))
+    application.add_handler(CallbackQueryHandler(
+        handle_quiet_hours_set, pattern="quiet_hours_set"
+    ))
+    application.add_handler(CallbackQueryHandler(
+        handle_quiet_hours_disable, pattern="quiet_hours_disable"
+    ))
+    application.add_handler(CallbackQueryHandler(
         show_user_settings_menu, pattern="settings_menu"
+    ))
+    application.add_handler(CallbackQueryHandler(
+        handle_contact_update_phone, pattern="contact_update_phone"
+    ))
+    application.add_handler(CallbackQueryHandler(
+        handle_contact_update_email, pattern="contact_update_email"
+    ))
+    application.add_handler(CallbackQueryHandler(
+        handle_contact_emergency, pattern="contact_emergency"
+    ))
+    application.add_handler(CallbackQueryHandler(
+        handle_settings_back, pattern="settings_back"
     ))
     
     # Organization handlers
@@ -2166,6 +2398,19 @@ def create_bot_application() -> Application:
         filters.LOCATION,
         handle_service_area_location
     ))
+    # Handle text inputs for quiet hours and contact details
+    application.add_handler(MessageHandler(
+        filters.TEXT & ~filters.COMMAND,
+        handle_quiet_hours_input
+    ))
+    application.add_handler(MessageHandler(
+        filters.TEXT & ~filters.COMMAND,
+        handle_phone_input
+    ))
+    application.add_handler(MessageHandler(
+        filters.TEXT & ~filters.COMMAND,
+        handle_email_input
+    ))
     
     # Error handler
     application.add_error_handler(error_handler)
@@ -2225,6 +2470,16 @@ async def handle_report_sharing(update: Update, context: ContextTypes.DEFAULT_TY
     )
     
     await query.message.reply_text(share_text, parse_mode=ParseMode.HTML)
+
+
+async def handle_settings_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Return from settings inline menu back to main keyboard menu."""
+    query = update.callback_query
+    await query.answer()
+    try:
+        await start_command(update, context)
+    except Exception:
+        pass
 
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
