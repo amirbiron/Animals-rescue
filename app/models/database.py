@@ -23,6 +23,7 @@ from sqlalchemy import (
     Float,
     ForeignKey,
     Index,
+    BigInteger,
     Integer,
     String,
     Text,
@@ -203,7 +204,7 @@ class User(Base, UUIDMixin, TimestampMixin):
     
     # Basic user information
     telegram_user_id: Mapped[Optional[int]] = mapped_column(
-        Integer,
+        BigInteger,
         unique=True,
         nullable=True,
         doc="Telegram user ID for bot integration"
@@ -1249,6 +1250,35 @@ async def create_tables() -> None:
                 error=str(exc),
             )
         await conn.run_sync(Base.metadata.create_all)
+        # Ensure users.telegram_user_id is BIGINT (Telegram IDs may exceed INT4)
+        try:
+            result = await conn.execute(
+                text(
+                    """
+                    SELECT data_type, udt_name
+                    FROM information_schema.columns
+                    WHERE table_schema = 'public'
+                      AND table_name = 'users'
+                      AND column_name = 'telegram_user_id'
+                    """
+                )
+            )
+            row = result.mappings().first()
+            if row and (row.get("udt_name") == "int4" or row.get("data_type") == "integer"):
+                await conn.execute(
+                    text(
+                        "ALTER TABLE users ALTER COLUMN telegram_user_id TYPE BIGINT USING telegram_user_id::BIGINT"
+                    )
+                )
+                logger.info(
+                    "Upgraded users.telegram_user_id to BIGINT",
+                    previous_type=row.get("udt_name") or row.get("data_type"),
+                )
+        except Exception as exc:  # noqa: BLE001 - log and continue
+            logger.warning(
+                "Failed to ensure BIGINT for users.telegram_user_id",
+                error=str(exc),
+            )
 
 
 async def wait_for_database(
