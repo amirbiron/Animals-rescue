@@ -362,14 +362,14 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         async with async_session_maker() as session:
             from sqlalchemy import select, desc
             
-        result = await session.execute(
-            select(Report)
-            .join(User)
-            .where(User.telegram_user_id == user.id)
-            .where(Report.status != ReportStatus.CLOSED)
-            .order_by(desc(Report.created_at))
-            .limit(5)
-        )
+            result = await session.execute(
+                select(Report)
+                .join(User)
+                .where(User.telegram_user_id == user.id)
+                .where(Report.status != ReportStatus.CLOSED)
+                .order_by(desc(Report.created_at))
+                .limit(5)
+            )
             reports = result.scalars().all()
         
         if not reports:
