@@ -68,5 +68,8 @@
   "api.not_found": "Resource not found",
   "alert.new_report.subject": "New Animal Rescue Report",
   "alert.new_report.body": "A new animal rescue report has been submitted.",
-  "alert.status_update.subject": "Status update: {status}"
+  "alert.status_update.subject": "Status update: {status}",
+
+  "language_select_title": "Choose a language:",
+  "language_changed": "Language set to {language} ✅"
 }

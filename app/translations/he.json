@@ -71,5 +71,8 @@
   "alert.new_report.subject": "דיווח הצלת בעלי חיים חדש",
   "alert.new_report.body": "התקבל דיווח הצלה חדש.",
 
-  "alert.status_update.subject": "עדכון סטטוס: {status}"
+  "alert.status_update.subject": "עדכון סטטוס: {status}",
+
+  "language_select_title": "בחר שפה:",
+  "language_changed": "השפה עודכנה ל‑{language} ✅"
 }

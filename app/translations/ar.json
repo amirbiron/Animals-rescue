@@ -71,5 +71,8 @@
   "alert.new_report.subject": "بلاغ إنقاذ حيوانات جديد",
   "alert.new_report.body": "تم استلام بلاغ إنقاذ جديد.",
 
-  "alert.status_update.subject": "تحديث الحالة: {status}"
+  "alert.status_update.subject": "تحديث الحالة: {status}",
+
+  "language_select_title": "اختر اللغة:",
+  "language_changed": "تم تعيين اللغة إلى {language} ✅"
 }
