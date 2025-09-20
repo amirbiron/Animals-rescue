@@ -3402,6 +3402,8 @@ async def handle_language_selection(update: Update, context: ContextTypes.DEFAUL
     db_user = await get_or_create_user(update.effective_user)
     await set_user_language(db_user.id, lang_code)
     context.user_data[USER_DATA_KEYS["language"]] = lang_code
+    # Also store under plain key for compatibility with tests/consumers
+    context.user_data["language"] = lang_code
 
     lang_names = {"he": "עברית", "en": "English", "ar": "العربية"}
     ack = get_text("language_changed", lang_code).format(language=lang_names.get(lang_code, lang_code))
