@@ -223,3 +223,49 @@ async def test_import_google_city_success_flow():
             assert end == ConversationHandler.END
             assert "awaiting_google_city" not in ctx.user_data
             assert msg.calls  # some reply was sent
+
+
+@pytest.mark.asyncio
+async def test_import_google_input_guard_no_flag():
+    # When not awaiting city, handler should not consume nor reply
+    ctx = make_context()
+    update = types.SimpleNamespace(message=MsgStub(text="ירושלים"), effective_user=None, effective_chat=None)
+    res = await handle_admin_import_google_input(update, ctx)
+    assert res == ADMIN_IMPORT_GOOGLE_CITY
+    assert update.message.calls == []
+
+
+@pytest.mark.asyncio
+async def test_import_location_input_guard_no_flag():
+    # Text radius with no awaiting flag
+    ctx = make_context()
+    update_txt = types.SimpleNamespace(message=MsgStub(text="רדיוס 5 ק""מ"), effective_user=None, effective_chat=None)
+    res1 = await handle_admin_import_location_inputs(update_txt, ctx)
+    assert res1 == ADMIN_IMPORT_LOCATION_INPUT
+    assert update_txt.message.calls == []
+
+    # Location with no awaiting flag
+    class _Loc:
+        latitude = 32.08
+        longitude = 34.78
+    update_loc = types.SimpleNamespace(message=MsgStub(location=_Loc()), effective_user=None, effective_chat=None)
+    res2 = await handle_admin_import_location_inputs(update_loc, ctx)
+    assert res2 == ADMIN_IMPORT_LOCATION_INPUT
+    assert update_loc.message.calls == []
+
+
+@pytest.mark.asyncio
+async def test_add_org_handlers_guard_wrong_step():
+    ctx = make_context()
+    # name input while step is not set
+    update_name = types.SimpleNamespace(message=MsgStub(text="שם כלשהו"), effective_user=None, effective_chat=None)
+    res_name = await handle_admin_add_org_name_input(update_name, ctx)
+    assert res_name == ADMIN_ADD_ORG_NAME
+    assert update_name.message.calls == []
+
+    # email input while step is not email
+    ctx.user_data["add_org"] = {"step": "type", "name": "X"}
+    update_email = types.SimpleNamespace(message=MsgStub(text="user@example.com"), effective_user=None, effective_chat=None)
+    res_email = await handle_admin_add_org_email_input(update_email, ctx)
+    assert res_email == ADMIN_ADD_ORG_EMAIL
+    assert update_email.message.calls == []
