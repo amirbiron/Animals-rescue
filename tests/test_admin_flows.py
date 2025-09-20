@@ -16,6 +16,7 @@ from app.bot.handlers import (
     handle_admin_add_org_name_input,
     handle_admin_add_org_type,
     handle_admin_add_org_email_input,
+    show_admin_orgs_menu,
 )
 from telegram.ext import ConversationHandler
 
@@ -90,6 +91,24 @@ async def test_import_google_city_failure_ends_conversation():
 
 
 @pytest.mark.asyncio
+async def test_show_admin_orgs_menu_permission_denied():
+    # Mock get_or_create_user to return non-admin
+    from app.models.database import UserRole
+    ctx = make_context()
+    msg = MsgStub(text="🏢 ניהול ארגונים")
+    update = types.SimpleNamespace(message=msg, effective_user=types.SimpleNamespace(id=10), effective_chat=None)
+
+    class _User:
+        role = UserRole.REPORTER
+
+    with patch("app.bot.handlers.get_or_create_user", new=AsyncMock(return_value=_User())):
+        await show_admin_orgs_menu(update, ctx)
+        # Should reply with permission_denied message (some text)
+        assert msg.calls
+
+
+
+@pytest.mark.asyncio
 async def test_import_location_failure_ends_conversation():
     ctx = make_context()
     ctx.user_data["awaiting_import_location"] = True
@@ -132,7 +151,8 @@ async def test_import_location_failure_ends_conversation():
             assert res == ConversationHandler.END
             assert "awaiting_import_location" not in ctx.user_data
             assert "import_radius_m" not in ctx.user_data
-            assert update.message.calls  # replied with error
+            # replied with error and keyboard removed is not relevant here
+            assert update.message.calls
 
 
 @pytest.mark.asyncio
