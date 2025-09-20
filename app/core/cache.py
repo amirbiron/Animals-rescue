@@ -77,9 +77,26 @@ class RedisConfig:
     def create_client(self, db: Optional[int] = None) -> redis.Redis:
         """Create Redis client with optimal configuration."""
         kwargs = self.connection_kwargs.copy()
+        # Prefer URL-based configuration if available (supports TLS via rediss://)
+        url: Optional[str] = None
+        if db == 1 and getattr(settings, "REDIS_QUEUE_URL", None):
+            url = settings.REDIS_QUEUE_URL
+        elif getattr(settings, "REDIS_URL", None):
+            url = settings.REDIS_URL
+        if url:
+            return redis.from_url(
+                url,
+                db=db if db is not None else None,
+                decode_responses=True,
+                socket_timeout=kwargs["socket_timeout"],
+                socket_connect_timeout=kwargs["socket_connect_timeout"],
+                health_check_interval=kwargs["health_check_interval"],
+                max_connections=kwargs["max_connections"],
+                retry_on_error=kwargs["retry_on_error"],
+                retry=kwargs["retry"],
+            )
         if db is not None:
             kwargs["db"] = db
-        
         return redis.Redis(**kwargs)
 
     def create_sync_client(self, db: Optional[int] = None) -> redis_sync.Redis:
@@ -87,6 +104,24 @@ class RedisConfig:
         kwargs = self.connection_kwargs.copy()
         # RQ expects byte responses; avoid automatic decoding
         kwargs["decode_responses"] = False
+        # Prefer URL-based configuration for sync client as well
+        url: Optional[str] = None
+        if db == 1 and getattr(settings, "REDIS_QUEUE_URL", None):
+            url = settings.REDIS_QUEUE_URL
+        elif getattr(settings, "REDIS_URL", None):
+            url = settings.REDIS_URL
+        if url:
+            return redis_sync.from_url(
+                url,
+                db=db if db is not None else None,
+                decode_responses=False,
+                socket_timeout=kwargs["socket_timeout"],
+                socket_connect_timeout=kwargs["socket_connect_timeout"],
+                health_check_interval=kwargs["health_check_interval"],
+                max_connections=kwargs["max_connections"],
+                retry_on_error=kwargs["retry_on_error"],
+                retry=kwargs["retry"],
+            )
         if db is not None:
             kwargs["db"] = db
         return redis_sync.Redis(**kwargs)

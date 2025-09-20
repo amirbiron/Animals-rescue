@@ -113,19 +113,27 @@ class Settings(BaseSettings):
     REDIS_DB: int = Field(default=0, description="Redis database number")
     REDIS_PASSWORD: Optional[str] = Field(default=None, description="Redis password")
     REDIS_MAX_CONNECTIONS: int = Field(default=20, description="Redis connection pool size")
-    
-    # Redis URLs for different purposes
-    @property
-    def REDIS_URL(self) -> str:
-        """Main Redis URL for general purpose."""
-        auth_part = f":{self.REDIS_PASSWORD}@" if self.REDIS_PASSWORD else ""
-        return f"redis://{auth_part}{self.REDIS_HOST}:{self.REDIS_PORT}/{self.REDIS_DB}"
-    
-    @property
-    def REDIS_QUEUE_URL(self) -> str:
-        """Redis URL for RQ job queue (uses DB 1)."""
-        auth_part = f":{self.REDIS_PASSWORD}@" if self.REDIS_PASSWORD else ""
-        return f"redis://{auth_part}{self.REDIS_HOST}:{self.REDIS_PORT}/1"
+    REDIS_URL: Optional[str] = Field(
+        default=None,
+        description="Full Redis URL (redis:// or rediss://) for main cache",
+    )
+    REDIS_QUEUE_URL: Optional[str] = Field(
+        default=None,
+        description="Redis URL for RQ job queue (uses DB 1)",
+    )
+
+    @model_validator(mode='after')
+    def assemble_redis_urls(self) -> 'Settings':
+        """Assemble Redis URLs if not provided explicitly via env variables."""
+        if not self.REDIS_URL:
+            auth_part = f":{self.REDIS_PASSWORD}@" if self.REDIS_PASSWORD else ""
+            url = f"redis://{auth_part}{self.REDIS_HOST}:{self.REDIS_PORT}/{self.REDIS_DB}"
+            object.__setattr__(self, "REDIS_URL", url)
+        if not self.REDIS_QUEUE_URL:
+            auth_part = f":{self.REDIS_PASSWORD}@" if self.REDIS_PASSWORD else ""
+            queue_url = f"redis://{auth_part}{self.REDIS_HOST}:{self.REDIS_PORT}/1"
+            object.__setattr__(self, "REDIS_QUEUE_URL", queue_url)
+        return self
     
     # =========================================================================
     # Telegram Bot Configuration
