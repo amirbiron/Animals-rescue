@@ -195,10 +195,49 @@ async def lifespan(app: FastAPI):
     # Initialize Redis connection
     try:
         from app.core.cache import redis_client
+        # Log sanitized Redis configuration for easier troubleshooting (no secrets)
+        try:
+            from urllib.parse import urlparse
+            redis_url = getattr(settings, "REDIS_URL", None)
+            parsed = urlparse(redis_url) if isinstance(redis_url, str) else None
+            host_port = None
+            db_index = None
+            scheme = None
+            if parsed:
+                scheme = parsed.scheme
+                host_port = parsed.netloc.split("@", 1)[-1] if parsed.netloc else None
+                db_index = parsed.path.lstrip("/") if parsed.path else None
+            logger.info(
+                "🔌 Redis config detected",
+                scheme=scheme,
+                host_port=host_port,
+                db=db_index,
+                tls=(scheme == "rediss"),
+            )
+        except Exception as parse_exc:
+            logger.warning("⚠️ Failed to parse REDIS_URL for logging", error=str(parse_exc))
+
         await redis_client.ping()
         logger.info("✅ Redis connection verified")
     except Exception as e:
-        logger.error("❌ Redis connection failed", error=str(e))
+        # Provide actionable hints for common TLS/port mismatch issues
+        error_text = str(e)
+        hints = []
+        if "WRONG_VERSION_NUMBER" in error_text:
+            hints.append(
+                "נראה שיש חוסר התאמה בין TLS לפורט. אם הספק דורש TLS השתמשו ב‑rediss:// ובפורט ה‑TLS; אם לא – השתמשו ב‑redis:// והפורט הבלתי מוצפן."
+            )
+            hints.append(
+                "בספקים כמו Render/Redis Cloud יש לרוב שני פורטים שונים (TLS/ללא TLS). ודאו שה‑URL והפורט תואמים."
+            )
+            hints.append(
+                "האפליקציה מעדיפה REDIS_TLS_URL אם מוגדר. ניתן להגדיר גם REDIS_URL ישירות עם rediss://."
+            )
+        logger.error(
+            "❌ Redis connection failed",
+            error=error_text,
+            hints=hints or None,
+        )
         # Redis is critical for background jobs
         raise
     
