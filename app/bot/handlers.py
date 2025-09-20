@@ -2666,7 +2666,7 @@ async def handle_admin_import_google_input(update: Update, context: ContextTypes
             logger.error("import_google_city_failed", city=city, error=str(e))
             await update.message.reply_text(f"שגיאה בייבוא: {e}")
             context.user_data.pop("awaiting_google_city", None)
-            return
+            return ConversationHandler.END
 
         # Clear flag and report result
         context.user_data.pop("awaiting_google_city", None)
