@@ -528,6 +528,55 @@ class GoogleService:
         )
         
         return all_results
+
+    async def search_animal_shelters(
+        self,
+        city: str,
+        radius: int = 15000,
+        language: str = "he"
+    ) -> List[Dict[str, Any]]:
+        """
+        Search for animal shelters and rescue organizations in a specific city.
+        """
+        city_location = await self.geocode(city, language=language)
+        if not city_location:
+            logger.warning("Could not geocode city for shelter search", city=city)
+            return []
+        location = (city_location["latitude"], city_location["longitude"]) 
+        search_terms = [
+            f"animal shelter {city}",
+            f"pet rescue {city}",
+            f"עמותת בעלי חיים {city}",
+            f"מקלט לבעלי חיים {city}",
+        ]
+        all_results: List[Dict[str, Any]] = []
+        seen_place_ids: set[str] = set()
+        for term in search_terms:
+            try:
+                results = await self.search_places(
+                    query=term,
+                    location=location,
+                    radius=radius,
+                    language=language
+                )
+                for result in results:
+                    place_id = result.get("place_id")
+                    if place_id and place_id not in seen_place_ids:
+                        types = result.get("types", [])
+                        name = (result.get("name") or "").lower()
+                        # Heuristics: shelter/rescue keywords or types
+                        if (
+                            any(k in name for k in ["shelter", "rescue", "עמותה", "מקלט"]) or
+                            any(t in types for t in ["animal_shelter"])
+                        ):
+                            all_results.append(result)
+                            seen_place_ids.add(place_id)
+                await asyncio.sleep(0.2)
+            except Exception as e:
+                logger.warning("Shelter search failed for term", term=term, error=str(e))
+                continue
+        logger.info("Animal shelters search completed", city=city, total_results=len(all_results))
+        return all_results
     
     # =========================================================================
     # Geocoding API Integration

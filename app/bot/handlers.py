@@ -2326,6 +2326,9 @@ async def show_admin_orgs_menu(update: Update, context: ContextTypes.DEFAULT_TYP
             callback_data="admin_add_org"
         )],
         [InlineKeyboardButton(
+            "🔎 ייבוא מגוגל לפי עיר", callback_data="admin_import_google"
+        )],
+        [InlineKeyboardButton(
             get_text("org_performance", lang),
             callback_data="admin_org_performance"
         )]
@@ -2379,6 +2382,64 @@ async def handle_admin_active_orgs(update: Update, context: ContextTypes.DEFAULT
         text += f"• {o.name} — {o.organization_type.value}\n"
         keyboard.append([InlineKeyboardButton(o.name, callback_data=f"admin_view_org_{o.id}")])
     await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
+
+
+async def handle_admin_import_google(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    lang = get_user_language(context)
+    context.user_data["awaiting_google_city"] = True
+    await query.edit_message_text("הכנס שם עיר לייבוא קליניקות ומקלטים (באנגלית/עברית)")
+
+
+async def handle_admin_import_google_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not context.user_data.get("awaiting_google_city"):
+        return
+    lang = get_user_language(context)
+    city = (getattr(update, 'message', None) and update.message.text or '').strip()
+    if not city:
+        await update.message.reply_text(get_text("invalid_input", lang))
+        return
+    from app.services.google import GoogleService
+    google = GoogleService()
+    created = 0
+    try:
+        async with google:
+            clinics = await google.search_veterinary_clinics(city)
+            shelters = await google.search_animal_shelters(city)
+        places = clinics + shelters
+        async with async_session_maker() as session:
+            from sqlalchemy import select
+            for place in places:
+                exists = await session.execute(select(Organization).where(Organization.google_place_id == place["place_id"]))
+                if exists.scalar_one_or_none():
+                    continue
+                org_type = (
+                    OrganizationType.ANIMAL_SHELTER
+                    if any(k in (place.get("name") or "").lower() for k in ["shelter", "rescue", "עמותה", "מקלט"]) else
+                    OrganizationType.VET_CLINIC
+                )
+                org = Organization(
+                    name=place["name"],
+                    organization_type=org_type,
+                    primary_phone=place.get("phone"),
+                    address=place.get("address"),
+                    city=city,
+                    latitude=place.get("latitude"),
+                    longitude=place.get("longitude"),
+                    google_place_id=place["place_id"],
+                    is_active=True,
+                    is_verified=False,
+                )
+                session.add(org)
+                created += 1
+            await session.commit()
+    except Exception as e:
+        await update.message.reply_text(f"שגיאה בייבוא: {e}")
+        context.user_data.pop("awaiting_google_city", None)
+        return
+    context.user_data.pop("awaiting_google_city", None)
+    await update.message.reply_text(f"ייבוא מגוגל הושלם. נוספו {created} ארגונים חדשים בעיר {city}.")
 
 
 async def handle_admin_add_org(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -3103,6 +3164,7 @@ def create_bot_application() -> Application:
     application.add_handler(CallbackQueryHandler(handle_admin_active_orgs, pattern="admin_active_orgs"))
     application.add_handler(CallbackQueryHandler(handle_admin_add_org, pattern="admin_add_org"))
     application.add_handler(CallbackQueryHandler(handle_admin_add_org_type, pattern="admin_add_org_type_.*"))
+    application.add_handler(CallbackQueryHandler(handle_admin_import_google, pattern="admin_import_google"))
     application.add_handler(CallbackQueryHandler(handle_admin_org_performance, pattern="admin_org_performance"))
     application.add_handler(CallbackQueryHandler(handle_admin_daily_report, pattern="admin_daily_report"))
     application.add_handler(CallbackQueryHandler(handle_admin_weekly_report, pattern="admin_weekly_report"))
@@ -3145,6 +3207,10 @@ def create_bot_application() -> Application:
     application.add_handler(MessageHandler(
         filters.TEXT & ~filters.COMMAND,
         handle_admin_broadcast_input
+    ))
+    application.add_handler(MessageHandler(
+        filters.TEXT & ~filters.COMMAND,
+        handle_admin_import_google_input
     ))
     
     # Error handler

@@ -975,7 +975,10 @@ async def _sync_google_places_data_async() -> Dict[str, Any]:
                     org.primary_phone = place_details.get("phone", org.primary_phone)
                     org.website = place_details.get("website", org.website)
                     org.address = place_details.get("address", org.address)
-                    org.operating_hours = place_details.get("hours", org.operating_hours)
+                    # Normalize opening_hours
+                    opening_hours = place_details.get("opening_hours") or place_details.get("hours")
+                    if opening_hours:
+                        org.operating_hours = opening_hours
                     
                     # Update location if needed
                     if place_details.get("latitude"):
@@ -994,14 +997,15 @@ async def _sync_google_places_data_async() -> Dict[str, Any]:
                 results["errors"].append(error_msg)
                 logger.warning("Organization sync failed", org_id=str(org.id), error=str(e))
         
-        # Search for new veterinary clinics in major cities
+        # Search for new veterinary clinics and shelters in major cities
         cities = ["Tel Aviv", "Jerusalem", "Haifa", "Rishon LeZion", "Petah Tikva"]
         
         for city in cities:
             try:
                 new_places = await google_service.search_veterinary_clinics(city)
+                new_shelters = await google_service.search_animal_shelters(city)
                 
-                for place in new_places:
+                for place in (new_places + new_shelters):
                     # Check if organization already exists
                     existing_org = await session.execute(
                         select(Organization).where(
@@ -1013,7 +1017,11 @@ async def _sync_google_places_data_async() -> Dict[str, Any]:
                         # Create new organization
                         new_org = Organization(
                             name=place["name"],
-                            organization_type=OrganizationType.VET_CLINIC,
+                            organization_type=(
+                                OrganizationType.ANIMAL_SHELTER
+                                if any(k in (place.get("name") or "").lower() for k in ["shelter", "rescue", "עמותה", "מקלט"]) else
+                                OrganizationType.VET_CLINIC
+                            ),
                             primary_phone=place.get("phone"),
                             address=place.get("address"),
                             city=city,
