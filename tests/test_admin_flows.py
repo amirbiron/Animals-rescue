@@ -315,6 +315,9 @@ async def test_add_org_invalid_email_stays_in_state():
     assert res == ADMIN_ADD_ORG_EMAIL
     assert ctx.user_data["add_org"]["step"] == "email"
     assert msg.calls  # invalid email reply
+    # Validate i18n text contains Hebrew invalid_email
+    last_text = msg.calls[-1][0][0]
+    assert "כתובת אימייל לא תקינה" in last_text
 
 
 @pytest.mark.asyncio
