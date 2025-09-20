@@ -3,6 +3,10 @@
 
 מערכת מקיפה לניהול פעולות חילוץ בעלי חיים דרך ממשק בוט טלגרם, עם התראות אוטומטיות לארגונים, תמיכה בריבוי שפות ולוח בקרה למנהלים.
 
+## ⚠️ חשוב: מצב הפרויקט
+**הבוט בנוי טכנית אך חסר החלק הקריטי ביותר - בסיס נתונים של ארגונים עם פרטי התקשרות.**  
+ראו [מסמך השיפור המקיף](docs/IMPROVEMENT_PLAN.md) ו[בעיות טכניות](docs/TECHNICAL_ISSUES.md) להנחיות מפורטות.
+
 ## 🎯 סקירה כללית
 בוט החילוץ מאפשר לאזרחים לדווח במהירות על בעלי חיים במצוקה דרך ממשק טלגרם ידידותי.  
 המערכת מעבדת את הדיווחים באופן אוטומטי, מבצעת התאמה גיאוגרפית לארגונים רלוונטיים, שולחת התראות לארגוני החילוץ ומספקת כלי ניהול מקיפים למנהלים.
@@ -47,6 +51,21 @@
 - מפתחות API של Google (Places & Geocoding)  
 
 ### התקנה
+
+#### 🔴 שלב קריטי: הוספת ארגונים למסד הנתונים
+לפני הרצת הבוט, **חובה להוסיף ארגונים עם פרטי קשר**:
+
+```bash
+# אפשרות 1: טעינת נתוני דוגמה
+psql -U postgres -d animal_rescue -f scripts/initial_data.sql
+
+# אפשרות 2: איסוף אוטומטי מ-Google Places (דורש API Key)
+python scripts/collect_organizations.py --source google --cities "תל אביב,ירושלים"
+
+# אפשרות 3: טעינה מקובץ CSV
+python scripts/collect_organizations.py --source manual --file data/sample_organizations.csv
+```
+
 1. שכפול הריפו  
 2. יצירת סביבת וירטואלית  
 3. התקנת תלויות  
