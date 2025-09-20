@@ -119,7 +119,7 @@ async def test_import_cities_run_summarizes():
                 return None
             async def commit(self):
                 return None
-        with patch("app.bot.handlers.GoogleService", return_value=_DummyGoogle()):
+        with patch("app.services.google.GoogleService", return_value=_DummyGoogle()):
             with patch("app.bot.handlers.async_session_maker", return_value=_FakeSession()):
                 await handle_admin_import_cities_run(update_cq, ctx)
                 # Should edit summary text with totals
