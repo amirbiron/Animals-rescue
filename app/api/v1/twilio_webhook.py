@@ -7,7 +7,7 @@ from __future__ import annotations
 from typing import Dict, Any, Optional
 
 import structlog
-from fastapi import APIRouter, Form, HTTPException
+from fastapi import APIRouter, Form, HTTPException, Request
 
 from app.core.config import settings
 from app.models.database import (
@@ -44,6 +44,7 @@ def _parse_decision(text: Optional[str]) -> Optional[str]:
 
 @router.post("/inbound")
 async def twilio_inbound(
+    request: Request,
     From: str = Form(...),
     Body: str = Form("")
 ) -> Dict[str, Any]:
@@ -53,6 +54,36 @@ async def twilio_inbound(
     then record the decision (accept/reject) by updating the related Report.
     """
     try:
+        # Validate Twilio signature
+        signature = request.headers.get("X-Twilio-Signature")
+        try:
+            from twilio.request_validator import RequestValidator  # type: ignore
+        except Exception as e:
+            logger.error("Twilio validator import failed", error=str(e))
+            raise HTTPException(status_code=500, detail="Twilio validator unavailable")
+
+        form = await request.form()
+        params = {k: v for k, v in form.items()}
+        validator = RequestValidator(settings.TWILIO_AUTH_TOKEN or "")
+        url_current = str(request.url)
+
+        def _validate(sig_url: str) -> bool:
+            try:
+                return bool(validator.validate(sig_url, params, signature or ""))
+            except Exception:
+                return False
+
+        if not signature or not _validate(url_current):
+            # Some deployments need external host for validation
+            alt_url = None
+            if settings.WEBHOOK_HOST:
+                alt_url = f"{settings.WEBHOOK_HOST.rstrip('/')}{request.url.path}"
+                if request.url.query:
+                    alt_url = f"{alt_url}?{request.url.query}"
+            if not (alt_url and _validate(alt_url)):
+                logger.warning("Twilio signature validation failed", url=url_current)
+                raise HTTPException(status_code=401, detail="Invalid signature")
+
         sender = _normalize_from_number(From)
         decision = _parse_decision(Body)
         logger.info("Twilio inbound", sender=sender, decision=decision)
