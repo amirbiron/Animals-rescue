@@ -17,6 +17,10 @@ from app.bot.handlers import (
     handle_admin_add_org_type,
     handle_admin_add_org_email_input,
     show_admin_orgs_menu,
+    show_org_statistics,
+    handle_admin_maintenance,
+    handle_admin_maintenance_enable,
+    handle_admin_maintenance_disable,
 )
 from telegram.ext import ConversationHandler
 from telegram import ReplyKeyboardRemove, ReplyKeyboardMarkup
@@ -110,6 +114,45 @@ async def test_show_admin_orgs_menu_permission_denied():
         # Should reply with permission_denied message (some text)
         assert msg.calls
         assert "אין לך הרשאה לבצע פעולה זו" in msg.calls[-1][0][0]
+
+
+@pytest.mark.asyncio
+async def test_show_org_statistics_smoke():
+    # Ensure handler replies something (DB mock minimal)
+    ctx = make_context()
+    msg = MsgStub(text="📈 סטטיסטיקות הארגון")
+    update = types.SimpleNamespace(message=msg, effective_user=types.SimpleNamespace(id=1))
+    class _User:
+        id = 1
+        role = types.SimpleNamespace(value="org_admin")
+        organization_id = None
+    with patch("app.bot.handlers.get_or_create_user", new=AsyncMock(return_value=_User())):
+        with patch("app.bot.handlers.async_session_maker"):
+            await show_org_statistics(update, ctx)
+            assert msg.calls
+
+
+@pytest.mark.asyncio
+async def test_admin_maintenance_toggle_flow():
+    ctx = make_context()
+    # Open maintenance menu when disabled
+    cq = CqStub("admin_maintenance")
+    update = types.SimpleNamespace(callback_query=cq)
+    with patch("app.bot.handlers.redis_client.get", new=AsyncMock(return_value=None)):
+        await handle_admin_maintenance(update, ctx)
+        assert cq.edited
+    # Enable
+    cq2 = CqStub("admin_maintenance_enable")
+    update2 = types.SimpleNamespace(callback_query=cq2)
+    with patch("app.bot.handlers.redis_client.set", new=AsyncMock(return_value=True)):
+        await handle_admin_maintenance_enable(update2, ctx)
+        assert cq2.edited and cq2.edited[-1][0][0]
+    # Disable
+    cq3 = CqStub("admin_maintenance_disable")
+    update3 = types.SimpleNamespace(callback_query=cq3)
+    with patch("app.bot.handlers.redis_client.set", new=AsyncMock(return_value=True)):
+        await handle_admin_maintenance_disable(update3, ctx)
+        assert cq3.edited and cq3.edited[-1][0][0]
 
 
 
