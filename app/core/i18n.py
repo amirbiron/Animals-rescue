@@ -129,7 +129,8 @@ class I18nService:
         try:
             cached_lang = await redis_client.get(cache_key)
             if cached_lang:
-                lang = cached_lang.decode('utf-8')
+                # redis client is configured with decode_responses=True and returns str
+                lang = cached_lang if isinstance(cached_lang, str) else cached_lang.decode('utf-8', errors='ignore')
                 if lang in SUPPORTED_LANGUAGES:
                     return lang
         except Exception as e:

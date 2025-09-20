@@ -414,7 +414,9 @@ async def rate_limiting_middleware(request: Request, call_next):
         # Skip rate limiting for health checks, docs, static, and Telegram webhook
         path = request.url.path
         excluded = {
+            "/",
             "/health",
+            "/ready",
             "/metrics",
             "/docs",
             "/redoc",
@@ -640,12 +642,27 @@ async def health_check():
     
     # Return appropriate status code
     status_code = (
-        200 if health_data["status"] == "healthy"
-        else 503 if health_data["status"] == "unhealthy"
-        else 200  # degraded but still operational
+        200 if health_data["status"] in {"healthy", "degraded"}
+        else 503
     )
     
     return JSONResponse(content=health_data, status_code=status_code)
+
+
+@app.get("/ready")
+async def readiness_check():
+    """
+    Readiness probe endpoint. Always returns 200 quickly without external checks
+    to avoid cascading failures and rate limit interactions.
+    """
+    return JSONResponse(
+        content={
+            "status": "ready",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "version": settings.APP_VERSION,
+        },
+        status_code=200
+    )
 
 
 @app.get("/metrics")
