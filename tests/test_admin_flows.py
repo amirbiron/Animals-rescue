@@ -237,6 +237,16 @@ async def test_import_google_input_guard_no_flag():
 
 
 @pytest.mark.asyncio
+async def test_import_google_empty_city_stays_in_state():
+    ctx = make_context()
+    ctx.user_data["awaiting_google_city"] = True
+    update = types.SimpleNamespace(message=MsgStub(text="   "), effective_user=None, effective_chat=None)
+    res = await handle_admin_import_google_input(update, ctx)
+    assert res == ADMIN_IMPORT_GOOGLE_CITY
+    assert update.message.calls  # invalid input reply
+
+
+@pytest.mark.asyncio
 async def test_import_location_input_guard_no_flag():
     # Text radius with no awaiting flag
     ctx = make_context()
