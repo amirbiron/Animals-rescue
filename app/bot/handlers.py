@@ -3582,51 +3582,62 @@ def create_bot_application() -> Application:
     # Handle location messages for service area setup
     application.add_handler(MessageHandler(
         filters.LOCATION,
-        handle_service_area_location
+        handle_service_area_location,
+        block=False
     ))
     # Admin add organization: capture name input early before generic text handlers
     application.add_handler(MessageHandler(
         filters.TEXT & ~filters.COMMAND,
-        handle_admin_add_org_name_input
+        handle_admin_add_org_name_input,
+        block=False
     ))
     # Handle text inputs for quiet hours and contact details
     application.add_handler(MessageHandler(
         filters.TEXT & ~filters.COMMAND,
-        handle_quiet_hours_input
+        handle_quiet_hours_input,
+        block=False
     ))
     application.add_handler(MessageHandler(
         filters.TEXT & ~filters.COMMAND,
-        handle_phone_input
+        handle_phone_input,
+        block=False
     ))
     application.add_handler(MessageHandler(
         filters.TEXT & ~filters.COMMAND,
-        handle_email_input
+        handle_email_input,
+        block=False
     ))
     # Admin text inputs
     application.add_handler(MessageHandler(
         filters.TEXT & ~filters.COMMAND,
-        handle_admin_search_input
+        handle_admin_search_input,
+        block=False
     ))
     application.add_handler(MessageHandler(
         filters.TEXT & ~filters.COMMAND,
-        handle_admin_broadcast_input
+        handle_admin_broadcast_input,
+        block=False
     ))
     application.add_handler(MessageHandler(
         filters.TEXT & ~filters.COMMAND,
-        handle_admin_import_google_input
+        handle_admin_import_google_input,
+        block=False
     ))
     # Admin add organization email input
     application.add_handler(MessageHandler(
         filters.TEXT & ~filters.COMMAND,
-        handle_admin_add_org_email_input
+        handle_admin_add_org_email_input,
+        block=False
     ))
     application.add_handler(MessageHandler(
         (filters.TEXT | filters.LOCATION) & ~filters.COMMAND,
-        handle_admin_import_location_inputs
+        handle_admin_import_location_inputs,
+        block=False
     ))
     application.add_handler(MessageHandler(
         filters.TEXT & ~filters.COMMAND,
-        handle_admin_import_cities_inputs
+        handle_admin_import_cities_inputs,
+        block=False
     ))
     
     # Detailed status and delete handlers
