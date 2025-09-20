@@ -514,6 +514,7 @@ def setup_logging() -> None:
         logging.getLogger("uvicorn").setLevel(logging.WARNING)
         logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
         logging.getLogger("httpx").setLevel(logging.WARNING)
+        logging.getLogger("httpcore").setLevel(logging.WARNING)
         # Quiet noisy Telegram library logs in production
         logging.getLogger("telegram").setLevel(logging.WARNING)
         logging.getLogger("telegram.ext").setLevel(logging.WARNING)
