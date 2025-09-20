@@ -19,7 +19,7 @@ import psutil
 
 import redis
 import structlog
-from rq import Worker, Queue, Connection, get_current_job
+from rq import Worker, Queue
 from rq.job import Job
 from rq.registry import StartedJobRegistry, FinishedJobRegistry, FailedJobRegistry
 from rq_scheduler import Scheduler
@@ -549,19 +549,18 @@ class WorkerManager:
         # Queue status
         queue_status = {}
         try:
-            with Connection(redis_queue_sync):
-                for queue_name in WORKER_QUEUES:
-                    queue = Queue(queue_name)
-                    started_registry = StartedJobRegistry(queue.name, queue.connection)
-                    finished_registry = FinishedJobRegistry(queue.name, queue.connection)
-                    failed_registry = FailedJobRegistry(queue.name, queue.connection)
-                    
-                    queue_status[queue_name] = {
-                        'pending': len(queue),
-                        'started': len(started_registry),
-                        'finished': len(finished_registry),
-                        'failed': len(failed_registry)
-                    }
+            for queue_name in WORKER_QUEUES:
+                queue = Queue(queue_name, connection=redis_queue_sync)
+                started_registry = StartedJobRegistry(queue.name, queue.connection)
+                finished_registry = FinishedJobRegistry(queue.name, queue.connection)
+                failed_registry = FailedJobRegistry(queue.name, queue.connection)
+                
+                queue_status[queue_name] = {
+                    'pending': len(queue),
+                    'started': len(started_registry),
+                    'finished': len(finished_registry),
+                    'failed': len(failed_registry)
+                }
         except Exception as e:
             logger.error("Error getting queue status", error=str(e))
             queue_status = {"error": str(e)}
@@ -585,23 +584,22 @@ class WorkerManager:
     async def get_job_info(self, job_id: str) -> Optional[Dict[str, Any]]:
         """Get information about a specific job."""
         try:
-            with Connection(redis_queue_sync):
-                job = Job.fetch(job_id, connection=redis_queue_sync)
-                
-                return {
-                    'id': job.id,
-                    'status': job.status,
-                    'func_name': job.func_name,
-                    'args': job.args,
-                    'kwargs': job.kwargs,
-                    'created_at': job.created_at.isoformat() if job.created_at else None,
-                    'started_at': job.started_at.isoformat() if job.started_at else None,
-                    'ended_at': job.ended_at.isoformat() if job.ended_at else None,
-                    'result': str(job.result) if job.result else None,
-                    'exc_info': job.exc_info,
-                    'timeout': job.timeout,
-                    'ttl': job.ttl
-                }
+            job = Job.fetch(job_id, connection=redis_queue_sync)
+            
+            return {
+                'id': job.id,
+                'status': job.status,
+                'func_name': job.func_name,
+                'args': job.args,
+                'kwargs': job.kwargs,
+                'created_at': job.created_at.isoformat() if job.created_at else None,
+                'started_at': job.started_at.isoformat() if job.started_at else None,
+                'ended_at': job.ended_at.isoformat() if job.ended_at else None,
+                'result': str(job.result) if job.result else None,
+                'exc_info': job.exc_info,
+                'timeout': job.timeout,
+                'ttl': job.ttl
+            }
         except Exception as e:
             logger.error(f"Error getting job info for {job_id}", error=str(e))
             return None
