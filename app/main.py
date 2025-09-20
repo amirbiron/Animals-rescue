@@ -672,7 +672,7 @@ async def version_info():
 # =============================================================================
 
 # Serve uploaded files (only in development)
-    if settings.is_development:
+if settings.is_development:
     uploads_dir = settings.UPLOAD_DIR
     uploads_dir.mkdir(exist_ok=True)
     app.mount("/uploads", StaticFiles(directory=uploads_dir), name="uploads")
