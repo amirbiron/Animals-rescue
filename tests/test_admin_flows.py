@@ -34,7 +34,8 @@ class MsgStub:
 class CqStub:
     def __init__(self, data=""):
         self.data = data
-        self.message = types.SimpleNamespace(message_id=1)
+        # Use MsgStub so handlers can call query.message.reply_text(...)
+        self.message = MsgStub()
         self.answered = False
         self.edited = []
 
