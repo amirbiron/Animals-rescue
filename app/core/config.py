@@ -115,6 +115,14 @@ class Settings(BaseSettings):
     REDIS_DB: int = Field(default=0, description="Redis database number")
     REDIS_PASSWORD: Optional[str] = Field(default=None, description="Redis password")
     REDIS_MAX_CONNECTIONS: int = Field(default=20, description="Redis connection pool size")
+    REDIS_TLS: bool = Field(
+        default=False,
+        description="Use TLS (SSL) for Redis when composing connection without URL"
+    )
+    REDIS_CA_CERT: Optional[Path] = Field(
+        default=None,
+        description="Path to CA certificate file used to verify Redis TLS connection"
+    )
     REDIS_URL: Optional[str] = Field(
         default=None,
         description="Full Redis URL (redis:// or rediss://) for main cache",
@@ -135,7 +143,8 @@ class Settings(BaseSettings):
                 object.__setattr__(self, "REDIS_URL", tls_url)
             else:
                 auth_part = f":{self.REDIS_PASSWORD}@" if self.REDIS_PASSWORD else ""
-                url = f"redis://{auth_part}{self.REDIS_HOST}:{self.REDIS_PORT}/{self.REDIS_DB}"
+                scheme = "rediss" if self.REDIS_TLS else "redis"
+                url = f"{scheme}://{auth_part}{self.REDIS_HOST}:{self.REDIS_PORT}/{self.REDIS_DB}"
                 object.__setattr__(self, "REDIS_URL", url)
         else:
             # If both variables are present and TLS URL is secure (rediss://) while REDIS_URL is non-TLS,

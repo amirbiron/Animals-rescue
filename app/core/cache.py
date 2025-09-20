@@ -20,6 +20,7 @@ from functools import wraps
 
 import redis.asyncio as redis
 import redis as redis_sync
+import ssl as ssl_mod
 from redis.exceptions import (
     BusyLoadingError,
     ConnectionError as RedisConnectionError,
@@ -73,6 +74,31 @@ class RedisConfig:
                 retries=3,
             ),
         }
+        
+        # TLS configuration defaults (applied when REDIS_URL uses rediss:// or REDIS_TLS is True)
+        self.tls_enabled_default = bool(getattr(settings, "REDIS_TLS", False))
+        self.ca_cert_path = str(settings.REDIS_CA_CERT) if getattr(settings, "REDIS_CA_CERT", None) else None
+
+    def _build_tls_kwargs(self, url: Optional[str]) -> Dict[str, Any]:
+        """Build TLS kwargs for redis-py based on URL scheme or settings."""
+        use_tls = False
+        if isinstance(url, str) and url.lower().startswith("rediss://"):
+            use_tls = True
+        elif self.tls_enabled_default and not (isinstance(url, str) and url.lower().startswith("redis://")):
+            # When composing without URL or non-explicit scheme and REDIS_TLS=True
+            use_tls = True
+
+        if not use_tls:
+            return {}
+
+        tls_kwargs: Dict[str, Any] = {"ssl": True}
+        # If CA is provided, require verification; otherwise, allow without verification
+        if self.ca_cert_path:
+            tls_kwargs["ssl_cert_reqs"] = ssl_mod.CERT_REQUIRED
+            tls_kwargs["ssl_ca_certs"] = self.ca_cert_path
+        else:
+            tls_kwargs["ssl_cert_reqs"] = ssl_mod.CERT_NONE
+        return tls_kwargs
     
     def create_client(self, db: Optional[int] = None) -> redis.Redis:
         """Create Redis client with optimal configuration."""
@@ -84,6 +110,7 @@ class RedisConfig:
         elif getattr(settings, "REDIS_URL", None):
             url = settings.REDIS_URL
         if url:
+            tls_kwargs = self._build_tls_kwargs(url)
             return redis.from_url(
                 url,
                 db=db if db is not None else None,
@@ -94,9 +121,12 @@ class RedisConfig:
                 max_connections=kwargs["max_connections"],
                 retry_on_error=kwargs["retry_on_error"],
                 retry=kwargs["retry"],
+                **tls_kwargs,
             )
         if db is not None:
             kwargs["db"] = db
+        # Apply TLS when composing without URL and REDIS_TLS=True
+        kwargs.update(self._build_tls_kwargs(None))
         return redis.Redis(**kwargs)
 
     def create_sync_client(self, db: Optional[int] = None) -> redis_sync.Redis:
@@ -111,6 +141,7 @@ class RedisConfig:
         elif getattr(settings, "REDIS_URL", None):
             url = settings.REDIS_URL
         if url:
+            tls_kwargs = self._build_tls_kwargs(url)
             return redis_sync.from_url(
                 url,
                 db=db if db is not None else None,
@@ -121,9 +152,12 @@ class RedisConfig:
                 max_connections=kwargs["max_connections"],
                 retry_on_error=kwargs["retry_on_error"],
                 retry=kwargs["retry"],
+                **tls_kwargs,
             )
         if db is not None:
             kwargs["db"] = db
+        # Apply TLS when composing without URL and REDIS_TLS=True
+        kwargs.update(self._build_tls_kwargs(None))
         return redis_sync.Redis(**kwargs)
 
 
