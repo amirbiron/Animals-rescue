@@ -1240,6 +1240,14 @@ async def get_db_session() -> AsyncSession:
 async def create_tables() -> None:
     """Create all database tables."""
     async with engine.begin() as conn:
+        # Ensure PostGIS extension exists before creating geometry columns
+        try:
+            await conn.execute(text("CREATE EXTENSION IF NOT EXISTS postgis"))
+        except Exception as exc:  # noqa: BLE001 - log and proceed (fallback to lat/lon columns)
+            logger.warning(
+                "PostGIS extension creation failed or unavailable",
+                error=str(exc),
+            )
         await conn.run_sync(Base.metadata.create_all)
 
 
@@ -1351,6 +1359,16 @@ async def check_database_health() -> Dict[str, Any]:
             # Test basic connectivity
             result = await session.execute(text("SELECT 1 as test"))
             test_value = result.scalar()
+            # Try to detect PostGIS availability and version
+            postgis_version: Optional[str] = None
+            try:
+                version_result = await session.execute(
+                    text("SELECT postgis_full_version()")
+                )
+                postgis_version = version_result.scalar()
+            except Exception:
+                # PostGIS not installed or function unavailable
+                postgis_version = None
             
             # Test table access
             user_count = await session.execute(text("SELECT COUNT(*) FROM users"))
@@ -1367,6 +1385,10 @@ async def check_database_health() -> Dict[str, Any]:
                 "test_query": test_value == 1,
                 "users_total": users_total,
                 "reports_today": reports_today,
+                "postgis": {
+                    "enabled": postgis_version is not None,
+                    "version": postgis_version,
+                },
                 "engine_pool_size": engine.pool.size(),
                 "engine_pool_checked_in": engine.pool.checkedin(),
                 "engine_pool_checked_out": engine.pool.checkedout(),
