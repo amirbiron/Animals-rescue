@@ -1163,35 +1163,40 @@ def schedule_recurring_jobs():
     scheduler.cron(
         cron_string="0 2 * * *",  # Every day at 2 AM
         func=cleanup_old_data,
-        timeout="30m"
+        timeout="30m",
+        use_local_timezone=False
     )
     
     # Update organization stats every 6 hours
     scheduler.cron(
         cron_string="0 */6 * * *",  # Every 6 hours
         func=update_organization_stats,
-        timeout="10m"
+        timeout="10m",
+        use_local_timezone=False
     )
     
     # Sync Google Places data weekly
     scheduler.cron(
         cron_string="0 3 * * 0",  # Every Sunday at 3 AM
         func=sync_google_places_data,
-        timeout="15m"
+        timeout="15m",
+        use_local_timezone=False
     )
     
     # Generate daily statistics at midnight
     scheduler.cron(
         cron_string="0 0 * * *",  # Every day at midnight
         func=generate_daily_statistics,
-        timeout="5m"
+        timeout="5m",
+        use_local_timezone=False
     )
     
     # Retry failed alerts every 15 minutes
     scheduler.cron(
         cron_string="*/15 * * * *",  # Every 15 minutes
         func=retry_failed_alerts,
-        timeout="2m"
+        timeout="2m",
+        use_local_timezone=False
     )
     
     logger.info("Recurring jobs scheduled")

@@ -1148,6 +1148,18 @@ bot = bot_application.bot
 
 async def initialize_bot() -> None:
     """Initialize the bot and set up webhook if configured."""
+    # Ensure Application is initialized and started so process_update works in webhook mode
+    try:
+        await bot_application.initialize()
+    except Exception:
+        # It might already be initialized
+        pass
+    try:
+        await bot_application.start()
+    except Exception:
+        # It might already be started
+        pass
+
     if settings.WEBHOOK_HOST and settings.TELEGRAM_WEBHOOK_URL:
         await bot.set_webhook(
             url=settings.TELEGRAM_WEBHOOK_URL,
