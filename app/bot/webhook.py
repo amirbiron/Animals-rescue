@@ -115,6 +115,15 @@ async def telegram_webhook(request: Request) -> Response:
         
         # Process update through bot application
         try:
+            # Ensure application is initialized/started (idempotent)
+            try:
+                await bot_application.initialize()
+            except Exception:
+                pass
+            try:
+                await bot_application.start()
+            except Exception:
+                pass
             await bot_application.process_update(update)
             
             logger.debug("Update processed successfully", update_id=update.update_id)

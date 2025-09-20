@@ -9,6 +9,8 @@ with support for environment variables and 12-Factor App principles.
 import logging
 import secrets
 from functools import lru_cache
+import os
+from urllib.parse import urlparse, urlunparse
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional
 
@@ -125,13 +127,34 @@ class Settings(BaseSettings):
     @model_validator(mode='after')
     def assemble_redis_urls(self) -> 'Settings':
         """Assemble Redis URLs if not provided explicitly via env variables."""
+        # Prefer fully specified REDIS_URL; also support providers that expose REDIS_TLS_URL
         if not self.REDIS_URL:
-            auth_part = f":{self.REDIS_PASSWORD}@" if self.REDIS_PASSWORD else ""
-            url = f"redis://{auth_part}{self.REDIS_HOST}:{self.REDIS_PORT}/{self.REDIS_DB}"
-            object.__setattr__(self, "REDIS_URL", url)
+            tls_url = os.getenv("REDIS_TLS_URL")
+            if tls_url:
+                object.__setattr__(self, "REDIS_URL", tls_url)
+            else:
+                auth_part = f":{self.REDIS_PASSWORD}@" if self.REDIS_PASSWORD else ""
+                url = f"redis://{auth_part}{self.REDIS_HOST}:{self.REDIS_PORT}/{self.REDIS_DB}"
+                object.__setattr__(self, "REDIS_URL", url)
+
+        # Derive REDIS_QUEUE_URL from REDIS_URL when not explicitly set, keeping same host/auth and switching DB to 1
         if not self.REDIS_QUEUE_URL:
-            auth_part = f":{self.REDIS_PASSWORD}@" if self.REDIS_PASSWORD else ""
-            queue_url = f"redis://{auth_part}{self.REDIS_HOST}:{self.REDIS_PORT}/1"
+            try:
+                parsed = urlparse(self.REDIS_URL)
+                # Replace path with /1 (DB index)
+                new_path = "/1"
+                queue_url = urlunparse((
+                    parsed.scheme,
+                    parsed.netloc,
+                    new_path,
+                    parsed.params,
+                    parsed.query,
+                    parsed.fragment,
+                ))
+            except Exception:
+                # Fallback to host/port composition
+                auth_part = f":{self.REDIS_PASSWORD}@" if self.REDIS_PASSWORD else ""
+                queue_url = f"redis://{auth_part}{self.REDIS_HOST}:{self.REDIS_PORT}/1"
             object.__setattr__(self, "REDIS_QUEUE_URL", queue_url)
         return self
     
@@ -275,6 +298,7 @@ class Settings(BaseSettings):
     # =========================================================================
     
     # RQ Worker configuration
+    ENABLE_WORKERS: bool = Field(default=False, description="Enable RQ workers (separate service recommended)")
     WORKER_PROCESSES: int = Field(default=2, description="Number of worker processes")
     WORKER_TIMEOUT: int = Field(default=300, description="Worker job timeout in seconds")
     

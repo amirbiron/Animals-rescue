@@ -46,7 +46,7 @@ from app.models.database import AnimalType, UrgencyLevel, ReportStatus, UserRole
 from app.services.nlp import NLPService
 from app.services.geocoding import GeocodingService
 from app.services.file_storage import FileStorageService
-from app.workers.jobs import process_new_report
+from app.workers.jobs import process_new_report, enqueue_or_run
 from app.core.i18n import get_text, detect_language, set_user_language
 
 # =============================================================================
@@ -886,8 +886,8 @@ async def submit_report(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
             await session.commit()
             await session.refresh(report)
         
-        # Queue background jobs
-        process_new_report.delay(str(report.id))
+        # Queue background jobs (or run inline when workers disabled)
+        enqueue_or_run(process_new_report, str(report.id))
         
         # Success message
         success_text = get_text("report_submitted_success", lang).format(
@@ -1148,6 +1148,18 @@ bot = bot_application.bot
 
 async def initialize_bot() -> None:
     """Initialize the bot and set up webhook if configured."""
+    # Ensure Application is initialized and started so process_update works in webhook mode
+    try:
+        await bot_application.initialize()
+    except Exception:
+        # It might already be initialized
+        pass
+    try:
+        await bot_application.start()
+    except Exception:
+        # It might already be started
+        pass
+
     if settings.WEBHOOK_HOST and settings.TELEGRAM_WEBHOOK_URL:
         await bot.set_webhook(
             url=settings.TELEGRAM_WEBHOOK_URL,
