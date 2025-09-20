@@ -74,6 +74,16 @@ USER_DATA_KEYS = {
 
 logger = structlog.get_logger(__name__)
 
+# Concurrency locks for admin imports
+_google_import_locks: Dict[int, asyncio.Lock] = {}
+
+def _get_google_import_lock(user_id: int) -> asyncio.Lock:
+    lock = _google_import_locks.get(user_id)
+    if lock is None:
+        lock = asyncio.Lock()
+        _google_import_locks[user_id] = lock
+    return lock
+
 # =============================================================================
 # Services Initialization
 # =============================================================================
@@ -2554,6 +2564,7 @@ async def handle_admin_import_location_inputs(update: Update, context: ContextTy
 
 
 async def handle_admin_import_google_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    # Guard: only act when awaiting city input
     if not context.user_data.get("awaiting_google_city"):
         return
     lang = get_user_language(context)
@@ -2561,51 +2572,63 @@ async def handle_admin_import_google_input(update: Update, context: ContextTypes
     if not city:
         await update.message.reply_text(get_text("invalid_input", lang))
         return
-    # Immediate feedback that import has started
-    try:
-        await update.message.reply_text("מבצע ייבוא... זה עלול לקחת עד כדקה ⏳")
-    except Exception:
-        pass
-    from app.services.google import GoogleService
-    google = GoogleService()
-    created = 0
-    try:
-        async with google:
-            clinics = await google.search_veterinary_clinics(city)
-            shelters = await google.search_animal_shelters(city)
-        places = clinics + shelters
-        async with async_session_maker() as session:
-            from sqlalchemy import select
-            for place in places:
-                exists = await session.execute(select(Organization).where(Organization.google_place_id == place["place_id"]))
-                if exists.scalar_one_or_none():
-                    continue
-                org_type = (
-                    OrganizationType.ANIMAL_SHELTER
-                    if any(k in (place.get("name") or "").lower() for k in ["shelter", "rescue", "עמותה", "מקלט"]) else
-                    OrganizationType.VET_CLINIC
-                )
-                org = Organization(
-                    name=place["name"],
-                    organization_type=org_type,
-                    primary_phone=place.get("phone"),
-                    address=place.get("address"),
-                    city=city,
-                    latitude=place.get("latitude"),
-                    longitude=place.get("longitude"),
-                    google_place_id=place["place_id"],
-                    is_active=True,
-                    is_verified=False,
-                )
-                session.add(org)
-                created += 1
-            await session.commit()
-    except Exception as e:
-        await update.message.reply_text(f"שגיאה בייבוא: {e}")
+
+    # Per-user concurrency lock to avoid parallel imports and race conditions
+    user = update.effective_user
+    lock = _get_google_import_lock(user.id if user else 0)
+    async with lock:
+        # Re-check flag after acquiring the lock in case another import already handled it
+        if not context.user_data.get("awaiting_google_city"):
+            return
+
+        # Immediate feedback that import has started
+        try:
+            await update.message.reply_text("מבצע ייבוא... זה עלול לקחת עד כדקה ⏳")
+        except Exception:
+            pass
+
+        from app.services.google import GoogleService
+        google = GoogleService()
+        created = 0
+        try:
+            async with google:
+                clinics = await google.search_veterinary_clinics(city)
+                shelters = await google.search_animal_shelters(city)
+            places = clinics + shelters
+            async with async_session_maker() as session:
+                from sqlalchemy import select
+                for place in places:
+                    exists = await session.execute(select(Organization).where(Organization.google_place_id == place["place_id"]))
+                    if exists.scalar_one_or_none():
+                        continue
+                    org_type = (
+                        OrganizationType.ANIMAL_SHELTER
+                        if any(k in (place.get("name") or "").lower() for k in ["shelter", "rescue", "עמותה", "מקלט"]) else
+                        OrganizationType.VET_CLINIC
+                    )
+                    org = Organization(
+                        name=place["name"],
+                        organization_type=org_type,
+                        primary_phone=place.get("phone"),
+                        address=place.get("address"),
+                        city=city,
+                        latitude=place.get("latitude"),
+                        longitude=place.get("longitude"),
+                        google_place_id=place["place_id"],
+                        is_active=True,
+                        is_verified=False,
+                    )
+                    session.add(org)
+                    created += 1
+                await session.commit()
+        except Exception as e:
+            await update.message.reply_text(f"שגיאה בייבוא: {e}")
+            context.user_data.pop("awaiting_google_city", None)
+            return
+
+        # Clear flag and report result
         context.user_data.pop("awaiting_google_city", None)
-        return
-    context.user_data.pop("awaiting_google_city", None)
-    await update.message.reply_text(f"ייבוא מגוגל הושלם. נוספו {created} ארגונים חדשים בעיר {city}.")
+        await update.message.reply_text(f"ייבוא מגוגל הושלם. נוספו {created} ארגונים חדשים בעיר {city}.")
 
 
 # =============================================================================
@@ -3582,34 +3605,41 @@ def create_bot_application() -> Application:
     # Handle location messages for service area setup
     application.add_handler(MessageHandler(
         filters.LOCATION,
-        handle_service_area_location
+        handle_service_area_location,
+        block=False
     ))
     # Admin add organization: capture name input early before generic text handlers
     application.add_handler(MessageHandler(
         filters.TEXT & ~filters.COMMAND,
-        handle_admin_add_org_name_input
+        handle_admin_add_org_name_input,
+        block=False
     ))
     # Handle text inputs for quiet hours and contact details
     application.add_handler(MessageHandler(
         filters.TEXT & ~filters.COMMAND,
-        handle_quiet_hours_input
+        handle_quiet_hours_input,
+        block=False
     ))
     application.add_handler(MessageHandler(
         filters.TEXT & ~filters.COMMAND,
-        handle_phone_input
+        handle_phone_input,
+        block=False
     ))
     application.add_handler(MessageHandler(
         filters.TEXT & ~filters.COMMAND,
-        handle_email_input
+        handle_email_input,
+        block=False
     ))
     # Admin text inputs
     application.add_handler(MessageHandler(
         filters.TEXT & ~filters.COMMAND,
-        handle_admin_search_input
+        handle_admin_search_input,
+        block=False
     ))
     application.add_handler(MessageHandler(
         filters.TEXT & ~filters.COMMAND,
-        handle_admin_broadcast_input
+        handle_admin_broadcast_input,
+        block=False
     ))
     application.add_handler(MessageHandler(
         filters.TEXT & ~filters.COMMAND,
@@ -3618,15 +3648,18 @@ def create_bot_application() -> Application:
     # Admin add organization email input
     application.add_handler(MessageHandler(
         filters.TEXT & ~filters.COMMAND,
-        handle_admin_add_org_email_input
+        handle_admin_add_org_email_input,
+        block=False
     ))
     application.add_handler(MessageHandler(
         (filters.TEXT | filters.LOCATION) & ~filters.COMMAND,
-        handle_admin_import_location_inputs
+        handle_admin_import_location_inputs,
+        block=False
     ))
     application.add_handler(MessageHandler(
         filters.TEXT & ~filters.COMMAND,
-        handle_admin_import_cities_inputs
+        handle_admin_import_cities_inputs,
+        block=False
     ))
     
     # Detailed status and delete handlers
