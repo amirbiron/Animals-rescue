@@ -186,6 +186,10 @@
   "admin_settings": "🔧 הגדרות מערכת",
   
   "users_management_title": "ניהול משתמשים",
+  "feature_placeholder": "[מוכן לבדיקה] {feature}",
+  "recent_users": "משתמשים אחרונים:",
+  "no_users_found": "לא נמצאו משתמשים",
+  "no_organizations_found": "לא נמצאו ארגונים פעילים",
   "search_user": "🔍 חיפוש משתמש",
   "view_all_users": "📋 הצג את כל המשתמשים",
   "user_roles_management": "👤 ניהול תפקידים",
