@@ -75,4 +75,16 @@
 
   "language_select_title": "اختر اللغة:",
   "language_changed": "تم تعيين اللغة إلى {language} ✅"
+,
+  "orgs_management_title": "إدارة المنظمات",
+  "pending_org_approvals": "🕐 منظمات بانتظار الموافقة",
+  "active_organizations": "✅ منظمات نشطة",
+  "add_organization": "➕ إضافة منظمة جديدة",
+  "prompt_org_name": "أدخل اسم المنظمة الجديدة:",
+  "select_org_type": "اختر نوع المنظمة:",
+  "org_performance": "📈 أداء المنظمات",
+  "approve_organization": "الموافقة على المنظمة",
+  "reject_organization": "رفض الطلب",
+  "org_approved": "تمت الموافقة على {name} ✅",
+  "org_rejected": "تم رفض طلب {name} ❌"
 }

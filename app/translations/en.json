@@ -72,4 +72,16 @@
 
   "language_select_title": "Choose a language:",
   "language_changed": "Language set to {language} ✅"
+,
+  "orgs_management_title": "Organizations Management",
+  "pending_org_approvals": "🕐 Pending organization approvals",
+  "active_organizations": "✅ Active organizations",
+  "add_organization": "➕ Add new organization",
+  "prompt_org_name": "Enter new organization name:",
+  "select_org_type": "Choose organization type:",
+  "org_performance": "📈 Organization performance",
+  "approve_organization": "Approve organization",
+  "reject_organization": "Reject request",
+  "org_approved": "Organization {name} approved ✅",
+  "org_rejected": "Organization request {name} rejected ❌"
 }
