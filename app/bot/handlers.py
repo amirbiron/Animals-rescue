@@ -42,7 +42,7 @@ from app.core.config import settings
 from app.core.cache import redis_client
 from app.core.rate_limit import check_rate_limit, RateLimitExceeded
 from app.models.database import async_session_maker, User, Report, ReportFile, UserSettings, Organization
-from app.models.database import AnimalType, UrgencyLevel, ReportStatus, UserRole
+from app.models.database import AnimalType, UrgencyLevel, ReportStatus, UserRole, OrganizationType
 from app.services.nlp import NLPService
 from app.services.geocoding import GeocodingService
 from app.services.file_storage import FileStorageService
@@ -282,6 +282,12 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         
         # Add role-specific buttons
         if db_user.role in [UserRole.ORG_STAFF, UserRole.ORG_ADMIN]:
+            keyboard.append([
+                KeyboardButton(get_text("org_reports_assigned", preferred_lang)),
+                KeyboardButton(get_text("org_statistics", preferred_lang))
+            ])
+        # Also show org tools for system admins that are assigned to an organization
+        if db_user.role == UserRole.SYSTEM_ADMIN and db_user.organization_id:
             keyboard.append([
                 KeyboardButton(get_text("org_reports_assigned", preferred_lang)),
                 KeyboardButton(get_text("org_statistics", preferred_lang))
@@ -1279,6 +1285,105 @@ async def handle_notification_settings(update: Update, context: ContextTypes.DEF
     await query.edit_message_text(text, reply_markup=reply_markup)
 
 
+async def handle_quiet_hours_settings(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show and control quiet hours settings."""
+    query = update.callback_query
+    await query.answer()
+    lang = get_user_language(context)
+    
+    db_user = await get_or_create_user(update.effective_user)
+    user_settings = await get_or_create_user_settings(db_user.id)
+    
+    if user_settings.quiet_hours_enabled and user_settings.quiet_hours_start and user_settings.quiet_hours_end:
+        status_text = get_text("quiet_hours_enabled", lang).format(
+            start=user_settings.quiet_hours_start,
+            end=user_settings.quiet_hours_end,
+        )
+    else:
+        status_text = get_text("quiet_hours_disabled", lang)
+    
+    keyboard = [
+        [InlineKeyboardButton(get_text("set_quiet_hours", lang), callback_data="quiet_hours_set")],
+        [InlineKeyboardButton(get_text("disable_quiet_hours", lang), callback_data="quiet_hours_disable")],
+        [InlineKeyboardButton(get_text("back", lang), callback_data="settings_notifications")],
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    text = f"{get_text('quiet_hours_menu', lang)}\n\n{status_text}\n\n{get_text('quiet_hours_instructions', lang)}"
+    await query.edit_message_text(text, reply_markup=reply_markup)
+
+
+async def handle_quiet_hours_set(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Prompt user to enter quiet hours time range."""
+    query = update.callback_query
+    await query.answer()
+    lang = get_user_language(context)
+    context.user_data["awaiting_quiet_hours"] = True
+    keyboard = [[InlineKeyboardButton(get_text("back", lang), callback_data="settings_notifications")]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await query.edit_message_text(get_text("quiet_hours_instructions", lang), reply_markup=reply_markup)
+
+
+async def handle_quiet_hours_disable(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Disable quiet hours immediately."""
+    query = update.callback_query
+    await query.answer()
+    lang = get_user_language(context)
+    
+    db_user = await get_or_create_user(update.effective_user)
+    async with async_session_maker() as session:
+        from sqlalchemy import select
+        result = await session.execute(select(UserSettings).where(UserSettings.user_id == db_user.id))
+        user_settings = result.scalar_one_or_none()
+        if not user_settings:
+            user_settings = UserSettings(user_id=db_user.id)
+            session.add(user_settings)
+        user_settings.quiet_hours_enabled = False
+        user_settings.quiet_hours_start = None
+        user_settings.quiet_hours_end = None
+        await session.commit()
+    
+    await query.edit_message_text(get_text("quiet_hours_disabled", lang))
+
+
+async def handle_quiet_hours_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle user text input for quiet hours time range (e.g., 22:00-07:00)."""
+    if not context.user_data.get("awaiting_quiet_hours"):
+        return
+    lang = get_user_language(context)
+    text = (getattr(update, 'message', None) and update.message.text or '').strip()
+    match = re.match(r"^(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})$", text)
+    if not match:
+        await update.message.reply_text(get_text("quiet_hours_instructions", lang))
+        return
+    h1, m1, h2, m2 = map(int, match.groups())
+    if not (0 <= h1 <= 23 and 0 <= h2 <= 23 and 0 <= m1 <= 59 and 0 <= m2 <= 59):
+        await update.message.reply_text(get_text("quiet_hours_instructions", lang))
+        return
+    start_s = f"{h1:02d}:{m1:02d}"
+    end_s = f"{h2:02d}:{m2:02d}"
+    
+    db_user = await get_or_create_user(update.effective_user)
+    async with async_session_maker() as session:
+        from sqlalchemy import select
+        result = await session.execute(select(UserSettings).where(UserSettings.user_id == db_user.id))
+        user_settings = result.scalar_one_or_none()
+        if not user_settings:
+            user_settings = UserSettings(user_id=db_user.id)
+            session.add(user_settings)
+        user_settings.quiet_hours_enabled = True
+        user_settings.quiet_hours_start = start_s
+        user_settings.quiet_hours_end = end_s
+        await session.commit()
+    
+    context.user_data.pop("awaiting_quiet_hours", None)
+    keyboard = [[InlineKeyboardButton(get_text("back", lang), callback_data="settings_notifications")]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text(
+        get_text("quiet_hours_updated", lang).format(start=start_s, end=end_s),
+        reply_markup=reply_markup
+    )
+
+
 async def handle_notification_category(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle specific notification category settings."""
     query = update.callback_query
@@ -1370,8 +1475,7 @@ async def handle_notification_toggle(update: Update, context: ContextTypes.DEFAU
         
         await session.commit()
     
-    # Refresh the menu
-    # Determine which category we're in
+    # Refresh the menu without mutating CallbackQuery
     if setting_key in ["notif_status_updates", "notif_org_messages", "notif_info_requests"]:
         category = "my"
     elif setting_key in ["notif_new_nearby", "notif_urgent_nearby", "notif_help_requests"]:
@@ -1380,10 +1484,47 @@ async def handle_notification_toggle(update: Update, context: ContextTypes.DEFAU
         category = "system"
     else:
         category = "org"
-    
-    # Simulate the category selection to refresh menu
-    query.data = f"notif_category_{category}"
-    await handle_notification_category(update, context)
+    lang = get_user_language(context)
+    # Fetch current settings
+    db_user = await get_or_create_user(update.effective_user)
+    settings = await get_or_create_user_settings(db_user.id)
+    # Build the category menu
+    keyboard = []
+    if category == "my":
+        notifications = [
+            ("notif_status_updates", settings.notif_status_updates),
+            ("notif_org_messages", settings.notif_org_messages),
+            ("notif_info_requests", settings.notif_info_requests),
+        ]
+        menu_text = get_text("notif_my_reports_menu", lang)
+    elif category == "area":
+        notifications = [
+            ("notif_new_nearby", settings.notif_new_nearby),
+            ("notif_urgent_nearby", settings.notif_urgent_nearby),
+            ("notif_help_requests", settings.notif_help_requests),
+        ]
+        menu_text = get_text("notif_area_menu", lang)
+    elif category == "system":
+        notifications = [
+            ("notif_admin_messages", settings.notif_admin_messages),
+            ("notif_updates_news", settings.notif_updates_news),
+            ("notif_reminders", settings.notif_reminders),
+        ]
+        menu_text = get_text("notif_system_menu", lang)
+    else:
+        notifications = [
+            ("notif_new_assigned", settings.notif_new_assigned),
+            ("notif_pending_reminders", settings.notif_pending_reminders),
+            ("notif_performance_updates", settings.notif_performance_updates),
+        ]
+        menu_text = get_text("notif_org_menu", lang)
+    for notif_key, enabled in notifications:
+        icon = "✅" if enabled else "❌"
+        text = get_text(notif_key, lang)
+        keyboard.append([InlineKeyboardButton(f"{icon} {text}", callback_data=f"toggle_{notif_key}")])
+    keyboard.append([InlineKeyboardButton(get_text("back", lang), callback_data="settings_notifications")])
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await query.edit_message_text(menu_text, reply_markup=reply_markup)
 
 
 async def handle_contact_details_settings(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1427,6 +1568,82 @@ async def handle_contact_details_settings(update: Update, context: ContextTypes.
     
     reply_markup = InlineKeyboardMarkup(keyboard)
     await query.edit_message_text(text, reply_markup=reply_markup)
+
+
+async def handle_contact_update_phone(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Prompt user to update primary phone number."""
+    query = update.callback_query
+    await query.answer()
+    context.user_data["awaiting_phone"] = True
+    await query.edit_message_text("אנא שלחו מספר טלפון בפורמט תקין (לדוגמה: 050-1234567)")
+
+
+async def handle_contact_update_email(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Prompt user to update primary email address."""
+    query = update.callback_query
+    await query.answer()
+    context.user_data["awaiting_email"] = True
+    await query.edit_message_text("אנא שלחו כתובת אימייל תקינה (לדוגמה: name@example.com)")
+
+
+async def handle_contact_emergency(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Prompt user to update emergency contact phone."""
+    query = update.callback_query
+    await query.answer()
+    context.user_data["awaiting_emergency_phone"] = True
+    await query.edit_message_text("שלחו מספר טלפון של איש קשר לחירום")
+
+
+async def handle_phone_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle phone number input for various flows."""
+    text = (getattr(update, 'message', None) and update.message.text or '').strip()
+    if not any([
+        context.user_data.get("awaiting_phone"),
+        context.user_data.get("awaiting_emergency_phone"),
+    ]):
+        return
+    normalized = re.sub(r"[^\d+]", "", text)
+    if not re.match(r"^\+?\d{7,15}$", normalized):
+        await update.message.reply_text("מספר לא תקין. נסו שוב.")
+        return
+    db_user = await get_or_create_user(update.effective_user)
+    if context.user_data.get("awaiting_phone"):
+        async with async_session_maker() as session:
+            user = await session.get(User, db_user.id)
+            user.phone = normalized
+            await session.commit()
+        context.user_data.pop("awaiting_phone", None)
+        await update.message.reply_text("מספר הטלפון עודכן ✅")
+        return
+    if context.user_data.get("awaiting_emergency_phone"):
+        async with async_session_maker() as session:
+            from sqlalchemy import select
+            result = await session.execute(select(UserSettings).where(UserSettings.user_id == db_user.id))
+            user_settings = result.scalar_one_or_none()
+            if not user_settings:
+                user_settings = UserSettings(user_id=db_user.id)
+                session.add(user_settings)
+            user_settings.emergency_contact_phone = normalized
+            await session.commit()
+        context.user_data.pop("awaiting_emergency_phone", None)
+        await update.message.reply_text("איש קשר חירום עודכן ✅")
+
+
+async def handle_email_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle email address input for contact details."""
+    if not context.user_data.get("awaiting_email"):
+        return
+    text = (getattr(update, 'message', None) and update.message.text or '').strip()
+    if not re.match(r"^[^\s@]+@[^\s@]+\.[^\s@]+$", text):
+        await update.message.reply_text("אימייל לא תקין. נסו שוב.")
+        return
+    db_user = await get_or_create_user(update.effective_user)
+    async with async_session_maker() as session:
+        user = await session.get(User, db_user.id)
+        user.email = text
+        await session.commit()
+    context.user_data.pop("awaiting_email", None)
+    await update.message.reply_text("האימייל עודכן ✅")
 
 
 # =============================================================================
@@ -1528,6 +1745,89 @@ async def handle_org_report_action(update: Update, context: ContextTypes.DEFAULT
         get_text("select_report_action", lang),
         reply_markup=reply_markup
     )
+
+
+async def handle_org_reports_list(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Return to assigned reports list from org submenu."""
+    query = update.callback_query
+    await query.answer()
+    lang = get_user_language(context)
+    user = update.effective_user
+    
+    # Get user and check permissions
+    db_user = await get_or_create_user(user)
+    allowed_roles = [UserRole.ORG_STAFF, UserRole.ORG_ADMIN, UserRole.SYSTEM_ADMIN]
+    if db_user.role not in allowed_roles or not db_user.organization_id:
+        await query.edit_message_text(get_text("permission_denied", lang))
+        return
+    
+    # Get assigned reports
+    async with async_session_maker() as session:
+        from sqlalchemy import select, desc
+        result = await session.execute(
+            select(Report)
+            .where(Report.assigned_organization_id == db_user.organization_id)
+            .where(Report.status.in_([
+                ReportStatus.SUBMITTED,
+                ReportStatus.PENDING,
+                ReportStatus.ACKNOWLEDGED,
+                ReportStatus.IN_PROGRESS
+            ]))
+            .order_by(desc(Report.urgency_level), desc(Report.created_at))
+            .limit(10)
+        )
+        reports = result.scalars().all()
+    
+    if not reports:
+        await query.edit_message_text(get_text("no_assigned_reports", lang))
+        return
+    
+    text = get_text("assigned_reports_title", lang) + "\n\n"
+    keyboard = []
+    for report in reports:
+        text += get_text("report_details", lang).format(
+            report_id=report.public_id,
+            location=report.city or report.address or get_text("location_unknown", lang),
+            urgency=get_text(f"urgency_{report.urgency_level.value}", lang),
+            animal_type=get_text(f"animal_{report.animal_type.value}", lang),
+            status=get_text(f"status_{report.status.value}", lang),
+            created_at=report.created_at.strftime("%d/%m %H:%M")
+        ) + "\n\n"
+        keyboard.append([InlineKeyboardButton(
+            f"#{report.public_id} - {get_text('select_report_action', lang)}",
+            callback_data=f"org_report_{report.public_id}"
+        )])
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await query.edit_message_text(text, reply_markup=reply_markup)
+
+
+async def handle_org_report_details(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show full details for a specific report in org context."""
+    query = update.callback_query
+    await query.answer()
+    lang = get_user_language(context)
+    public_id = query.data.replace("org_details_", "")
+    
+    # Get report
+    async with async_session_maker() as session:
+        from sqlalchemy import select
+        result = await session.execute(select(Report).where(Report.public_id == public_id))
+        report = result.scalar_one_or_none()
+    if not report:
+        await query.edit_message_text(get_text("report_not_found", lang))
+        return
+    
+    text = get_text("report_details", lang).format(
+        report_id=report.public_id,
+        location=report.city or report.address or get_text("location_unknown", lang),
+        urgency=get_text(f"urgency_{report.urgency_level.value}", lang),
+        animal_type=get_text(f"animal_{report.animal_type.value}", lang),
+        status=get_text(f"status_{report.status.value}", lang),
+        created_at=report.created_at.strftime("%d/%m %H:%M")
+    )
+    keyboard = [[InlineKeyboardButton(get_text("back", lang), callback_data=f"org_report_{public_id}")]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await query.edit_message_text(text, reply_markup=reply_markup)
 
 
 async def handle_org_acknowledge_report(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1762,6 +2062,245 @@ async def show_admin_users_menu(update: Update, context: ContextTypes.DEFAULT_TY
     )
 
 
+async def handle_admin_search_user(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    lang = get_user_language(context)
+    context.user_data["awaiting_user_search"] = True
+    await query.edit_message_text(get_text("user_search_instructions", lang))
+
+
+async def handle_admin_list_users(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    lang = get_user_language(context)
+    # Show up to 10 recent users
+    async with async_session_maker() as session:
+        from sqlalchemy import select, desc
+        result = await session.execute(select(User).order_by(desc(User.created_at)).limit(10))
+        users = result.scalars().all()
+    if not users:
+        await query.edit_message_text(get_text("no_users_found", lang))
+        return
+    text = get_text("recent_users", lang) + "\n\n"
+    keyboard = []
+    for u in users:
+        display = u.full_name or u.username or u.email or str(u.telegram_user_id) or str(u.id)
+        text += f"• {display} — {u.role.value}\n"
+        keyboard.append([InlineKeyboardButton(display, callback_data=f"admin_view_user_{u.id}")])
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await query.edit_message_text(text, reply_markup=reply_markup)
+
+
+async def handle_admin_manage_roles(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    lang = get_user_language(context)
+    await query.edit_message_text(get_text("user_search_instructions", lang))
+    context.user_data["awaiting_user_search"] = True
+
+
+async def handle_admin_blocked_users(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    lang = get_user_language(context)
+    # List deactivated users
+    async with async_session_maker() as session:
+        from sqlalchemy import select
+        result = await session.execute(select(User).where(User.is_active == False))
+        users = result.scalars().all()
+    if not users:
+        await query.edit_message_text(get_text("no_users_found", lang))
+        return
+    keyboard = []
+    text = get_text("blocked_users", lang) + "\n\n"
+    for u in users:
+        display = u.full_name or u.username or u.email or str(u.telegram_user_id) or str(u.id)
+        text += f"• {display}\n"
+        keyboard.append([InlineKeyboardButton(display, callback_data=f"admin_view_user_{u.id}")])
+    await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
+
+
+async def handle_admin_search_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle admin user search input."""
+    if not context.user_data.get("awaiting_user_search"):
+        return
+    lang = get_user_language(context)
+    q = (getattr(update, 'message', None) and update.message.text or '').strip()
+    if not q:
+        await update.message.reply_text(get_text("user_search_instructions", lang))
+        return
+    async with async_session_maker() as session:
+        from sqlalchemy import select, or_
+        # Try to parse as telegram id
+        tele_id = None
+        try:
+            tele_id = int(q)
+        except Exception:
+            tele_id = None
+        stmt = select(User).where(
+            or_(
+                User.username.ilike(f"%{q}%"),
+                User.full_name.ilike(f"%{q}%"),
+                User.email.ilike(f"%{q}%"),
+                User.telegram_user_id == tele_id if tele_id else False,
+            )
+        ).limit(20)
+        result = await session.execute(stmt)
+        users = result.scalars().all()
+    context.user_data.pop("awaiting_user_search", None)
+    if not users:
+        await update.message.reply_text(get_text("user_not_found", lang))
+        return
+    keyboard = []
+    for u in users:
+        display = u.full_name or u.username or u.email or str(u.telegram_user_id) or str(u.id)
+        keyboard.append([InlineKeyboardButton(display, callback_data=f"admin_view_user_{u.id}")])
+    await update.message.reply_text(get_text("recent_users", lang), reply_markup=InlineKeyboardMarkup(keyboard))
+
+
+async def handle_admin_view_user(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    lang = get_user_language(context)
+    user_id_str = query.data.replace("admin_view_user_", "")
+    import uuid as _uuid
+    try:
+        user_uuid = _uuid.UUID(user_id_str)
+    except Exception:
+        await query.edit_message_text(get_text("user_not_found", lang))
+        return
+    async with async_session_maker() as session:
+        user = await session.get(User, user_uuid)
+    if not user:
+        await query.edit_message_text(get_text("user_not_found", lang))
+        return
+    role_map = {
+        UserRole.REPORTER: get_text("role_reporter", lang),
+        UserRole.ORG_STAFF: get_text("role_org_staff", lang),
+        UserRole.ORG_ADMIN: get_text("role_org_admin", lang),
+        UserRole.SYSTEM_ADMIN: get_text("role_system_admin", lang),
+    }
+    text = get_text("user_details", lang).format(
+        name=user.full_name or user.username or user.email or str(user.telegram_user_id) or str(user.id),
+        id=str(user.id),
+        email=user.email or get_text("no", lang),
+        phone=user.phone or get_text("no", lang),
+        role=role_map.get(user.role, user.role.value),
+        reports_count=user.reports_count,
+        trust_score=int(user.trust_score),
+    )
+    # Actions
+    keyboard = [
+        [InlineKeyboardButton(get_text("change_user_role", lang), callback_data=f"admin_roles_{user.id}")],
+    ]
+    if user.is_active:
+        keyboard.append([InlineKeyboardButton(get_text("block_user", lang), callback_data=f"admin_block_user_{user.id}")])
+    else:
+        keyboard.append([InlineKeyboardButton(get_text("unblock_user", lang), callback_data=f"admin_unblock_user_{user.id}")])
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await query.edit_message_text(text, reply_markup=reply_markup)
+
+
+async def handle_admin_roles(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    lang = get_user_language(context)
+    user_id_str = query.data.replace("admin_roles_", "")
+    import uuid as _uuid
+    try:
+        user_uuid = _uuid.UUID(user_id_str)
+    except Exception:
+        await query.edit_message_text(get_text("user_not_found", lang))
+        return
+    # Show role options
+    keyboard = [
+        [InlineKeyboardButton(get_text("role_reporter", lang), callback_data=f"admin_set_role_{user_uuid}_reporter")],
+        [InlineKeyboardButton(get_text("role_org_staff", lang), callback_data=f"admin_set_role_{user_uuid}_org_staff")],
+        [InlineKeyboardButton(get_text("role_org_admin", lang), callback_data=f"admin_set_role_{user_uuid}_org_admin")],
+        [InlineKeyboardButton(get_text("role_system_admin", lang), callback_data=f"admin_set_role_{user_uuid}_system_admin")],
+    ]
+    await query.edit_message_text(get_text("user_roles_management", lang), reply_markup=InlineKeyboardMarkup(keyboard))
+
+
+async def handle_admin_set_role(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    lang = get_user_language(context)
+    data = query.data.replace("admin_set_role_", "")
+    parts = data.split("_")
+    try:
+        user_id = parts[0]
+        role = "_".join(parts[1:])
+    except Exception:
+        await query.edit_message_text(get_text("operation_failed", lang))
+        return
+    import uuid as _uuid
+    try:
+        user_uuid = _uuid.UUID(user_id)
+    except Exception:
+        await query.edit_message_text(get_text("operation_failed", lang))
+        return
+    # If org role, prompt to select org
+    if role in {"org_staff", "org_admin"}:
+        # List active orgs
+        async with async_session_maker() as session:
+            from sqlalchemy import select
+            result = await session.execute(select(Organization).where(Organization.is_active == True).limit(20))
+            orgs = result.scalars().all()
+        if not orgs:
+            await query.edit_message_text(get_text("no_organizations_found", lang))
+            return
+        keyboard = []
+        for org in orgs:
+            keyboard.append([InlineKeyboardButton(org.name, callback_data=f"admin_assign_org_{user_uuid}_{role}_{org.id}")])
+        await query.edit_message_text(get_text("active_organizations", lang), reply_markup=InlineKeyboardMarkup(keyboard))
+        return
+    # Else set role directly
+    async with async_session_maker() as session:
+        user = await session.get(User, user_uuid)
+        if not user:
+            await query.edit_message_text(get_text("user_not_found", lang))
+            return
+        user.role = UserRole(role)
+        if role in {"system_admin", "reporter"}:
+            user.organization_id = None
+        await session.commit()
+    await query.edit_message_text(get_text("user_role_updated", lang).format(role=get_text(f"role_{role}", lang)))
+
+
+async def handle_admin_assign_org(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    lang = get_user_language(context)
+    data = query.data.replace("admin_assign_org_", "")
+    parts = data.split("_")
+    try:
+        user_id = parts[0]
+        role = parts[1]  # org_staff or org_admin
+        org_id = "_".join(parts[2:])
+    except Exception:
+        await query.edit_message_text(get_text("operation_failed", lang))
+        return
+    import uuid as _uuid
+    try:
+        user_uuid = _uuid.UUID(user_id)
+        org_uuid = _uuid.UUID(org_id)
+    except Exception:
+        await query.edit_message_text(get_text("operation_failed", lang))
+        return
+    async with async_session_maker() as session:
+        user = await session.get(User, user_uuid)
+        org = await session.get(Organization, org_uuid)
+        if not user or not org:
+            await query.edit_message_text(get_text("operation_failed", lang))
+            return
+        user.role = UserRole(role)
+        user.organization_id = org.id
+        await session.commit()
+    await query.edit_message_text(get_text("user_role_updated", lang).format(role=get_text(f"role_{role}", lang)))
+
+
 async def show_admin_orgs_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Show admin organizations management menu."""
     lang = get_user_language(context)
@@ -1787,6 +2326,18 @@ async def show_admin_orgs_menu(update: Update, context: ContextTypes.DEFAULT_TYP
             callback_data="admin_add_org"
         )],
         [InlineKeyboardButton(
+            "🔎 ייבוא מגוגל לפי עיר", callback_data="admin_import_google"
+        )],
+        [InlineKeyboardButton(
+            "📍 ייבוא לפי מיקום", callback_data="admin_import_location"
+        )],
+        [InlineKeyboardButton(
+            "🗺️ ניהול ערי ייבוא", callback_data="admin_import_cities"
+        )],
+        [InlineKeyboardButton(
+            "🧭 העשרת כתובות (Geocoding)", callback_data="admin_geocode_orgs"
+        )],
+        [InlineKeyboardButton(
             get_text("org_performance", lang),
             callback_data="admin_org_performance"
         )]
@@ -1797,6 +2348,239 @@ async def show_admin_orgs_menu(update: Update, context: ContextTypes.DEFAULT_TYP
         get_text("orgs_management_title", lang),
         reply_markup=reply_markup
     )
+
+
+async def handle_admin_pending_orgs(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    lang = get_user_language(context)
+    # Show up to 10 unverified orgs
+    async with async_session_maker() as session:
+        from sqlalchemy import select
+        result = await session.execute(select(Organization).where(Organization.is_verified == False).limit(10))
+        orgs = result.scalars().all()
+    if not orgs:
+        await query.edit_message_text(get_text("no_organizations_found", lang))
+        return
+    text = get_text("pending_org_approvals", lang) + "\n\n"
+    keyboard = []
+    for org in orgs:
+        text += f"• {org.name}\n"
+        keyboard.append([
+            InlineKeyboardButton(get_text("approve_organization", lang), callback_data=f"admin_approve_org_{org.id}"),
+            InlineKeyboardButton(get_text("reject_organization", lang), callback_data=f"admin_reject_org_{org.id}"),
+        ])
+    await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
+
+
+async def handle_admin_active_orgs(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    lang = get_user_language(context)
+    # Show up to 10 active orgs
+    async with async_session_maker() as session:
+        from sqlalchemy import select, desc
+        result = await session.execute(select(Organization).where(Organization.is_active == True).order_by(desc(Organization.created_at)).limit(10))
+        orgs = result.scalars().all()
+    if not orgs:
+        await query.edit_message_text(get_text("no_organizations_found", lang))
+        return
+    text = get_text("active_organizations", lang) + "\n\n"
+    keyboard = []
+    for o in orgs:
+        text += f"• {o.name} — {o.organization_type.value}\n"
+        keyboard.append([InlineKeyboardButton(o.name, callback_data=f"admin_view_org_{o.id}")])
+    await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
+
+
+async def handle_admin_import_google(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    lang = get_user_language(context)
+    context.user_data["awaiting_google_city"] = True
+    await query.edit_message_text("הכנס שם עיר לייבוא קליניקות ומקלטים (באנגלית/עברית)")
+
+
+async def handle_admin_import_location(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    lang = get_user_language(context)
+    context.user_data["awaiting_import_location"] = True
+    keyboard = [
+        [KeyboardButton(get_text("share_location", lang), request_location=True)],
+        [KeyboardButton("רדיוס 5 ק""מ"), KeyboardButton("רדיוס 10 ק""מ")],
+        [KeyboardButton("רדיוס 20 ק""מ"), KeyboardButton("רדיוס 50 ק""מ")],
+    ]
+    await query.edit_message_text("שלח מיקום GPS ובחר רדיוס (5/10/20/50 ק""מ)")
+    await query.message.reply_text("בחר רדיוס:", reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True))
+
+
+async def handle_admin_import_location_inputs(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Collect location and radius, then import nearby orgs."""
+    if not context.user_data.get("awaiting_import_location"):
+        return
+    lang = get_user_language(context)
+    # Determine radius selection
+    text = (getattr(update, 'message', None) and update.message.text or '')
+    radius_map = {
+        "רדיוס 5 ק""מ": 5000,
+        "רדיוס 10 ק""מ": 10000,
+        "רדיוס 20 ק""מ": 20000,
+        "רדיוס 50 ק""מ": 50000,
+    }
+    if text in radius_map:
+        context.user_data["import_radius_m"] = radius_map[text]
+        await update.message.reply_text("עכשיו שלח את המיקום שלך (כפתור 'שתף מיקום')")
+        return
+    if getattr(update, 'message', None) and update.message.location:
+        loc = update.message.location
+        radius = int(context.user_data.get("import_radius_m", 10000))
+        from app.services.google import GoogleService
+        google = GoogleService()
+        created = 0
+        try:
+            async with google:
+                clinics = await google.search_veterinary_nearby((loc.latitude, loc.longitude), radius=radius)
+                shelters = await google.search_shelters_nearby((loc.latitude, loc.longitude), radius=radius)
+            places = clinics + shelters
+            async with async_session_maker() as session:
+                from sqlalchemy import select
+                for place in places:
+                    exists = await session.execute(select(Organization).where(Organization.google_place_id == place["place_id"]))
+                    if exists.scalar_one_or_none():
+                        continue
+                    org_type = (
+                        OrganizationType.ANIMAL_SHELTER
+                        if any(k in (place.get("name") or "").lower() for k in ["shelter", "rescue", "עמותה", "מקלט"]) else
+                        OrganizationType.VET_CLINIC
+                    )
+                    org = Organization(
+                        name=place["name"],
+                        organization_type=org_type,
+                        primary_phone=place.get("phone"),
+                        address=place.get("address"),
+                        city=None,
+                        latitude=place.get("latitude"),
+                        longitude=place.get("longitude"),
+                        google_place_id=place["place_id"],
+                        is_active=True,
+                        is_verified=False,
+                    )
+                    session.add(org)
+                    created += 1
+                await session.commit()
+        except Exception as e:
+            await update.message.reply_text(f"שגיאה בייבוא: {e}")
+            context.user_data.pop("awaiting_import_location", None)
+            context.user_data.pop("import_radius_m", None)
+            return
+        context.user_data.pop("awaiting_import_location", None)
+        context.user_data.pop("import_radius_m", None)
+        await update.message.reply_text(
+            f"ייבוא לפי מיקום הושלם. נוספו {created} ארגונים חדשים ברדיוס {int(radius/1000)} ק""מ.",
+            reply_markup=ReplyKeyboardRemove()
+        )
+
+
+async def handle_admin_import_google_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not context.user_data.get("awaiting_google_city"):
+        return
+    lang = get_user_language(context)
+    city = (getattr(update, 'message', None) and update.message.text or '').strip()
+    if not city:
+        await update.message.reply_text(get_text("invalid_input", lang))
+        return
+    from app.services.google import GoogleService
+    google = GoogleService()
+    created = 0
+    try:
+        async with google:
+            clinics = await google.search_veterinary_clinics(city)
+            shelters = await google.search_animal_shelters(city)
+        places = clinics + shelters
+        async with async_session_maker() as session:
+            from sqlalchemy import select
+            for place in places:
+                exists = await session.execute(select(Organization).where(Organization.google_place_id == place["place_id"]))
+                if exists.scalar_one_or_none():
+                    continue
+                org_type = (
+                    OrganizationType.ANIMAL_SHELTER
+                    if any(k in (place.get("name") or "").lower() for k in ["shelter", "rescue", "עמותה", "מקלט"]) else
+                    OrganizationType.VET_CLINIC
+                )
+                org = Organization(
+                    name=place["name"],
+                    organization_type=org_type,
+                    primary_phone=place.get("phone"),
+                    address=place.get("address"),
+                    city=city,
+                    latitude=place.get("latitude"),
+                    longitude=place.get("longitude"),
+                    google_place_id=place["place_id"],
+                    is_active=True,
+                    is_verified=False,
+                )
+                session.add(org)
+                created += 1
+            await session.commit()
+    except Exception as e:
+        await update.message.reply_text(f"שגיאה בייבוא: {e}")
+        context.user_data.pop("awaiting_google_city", None)
+        return
+    context.user_data.pop("awaiting_google_city", None)
+    await update.message.reply_text(f"ייבוא מגוגל הושלם. נוספו {created} ארגונים חדשים בעיר {city}.")
+
+
+async def handle_admin_add_org(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    lang = get_user_language(context)
+    context.user_data["add_org"] = {"step": "name"}
+    await query.edit_message_text(get_text("add_organization", lang) + "\n\n" + get_text("enter_address_manually", lang))
+
+
+async def handle_admin_add_org_name_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not context.user_data.get("add_org") or context.user_data.get("add_org", {}).get("step") != "name":
+        return
+    lang = get_user_language(context)
+    name = (getattr(update, 'message', None) and update.message.text or '').strip()
+    if not name:
+        await update.message.reply_text(get_text("invalid_input", lang))
+        return
+    context.user_data["add_org"] = {"step": "type", "name": name}
+    # Show type options
+    keyboard = []
+    for t in [OrganizationType.VET_CLINIC, OrganizationType.EMERGENCY_VET, OrganizationType.ANIMAL_HOSPITAL, OrganizationType.ANIMAL_SHELTER, OrganizationType.RESCUE_ORG, OrganizationType.GOVERNMENT, OrganizationType.VOLUNTEER_GROUP]:
+        keyboard.append([InlineKeyboardButton(t.value, callback_data=f"admin_add_org_type_{t.value}")])
+    await update.message.reply_text(get_text("orgs_management_title", lang), reply_markup=InlineKeyboardMarkup(keyboard))
+
+
+async def handle_admin_add_org_type(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not context.user_data.get("add_org") or context.user_data.get("add_org", {}).get("step") != "type":
+        return
+    query = update.callback_query
+    await query.answer()
+    lang = get_user_language(context)
+    org_type = query.data.replace("admin_add_org_type_", "")
+    name = context.user_data.get("add_org", {}).get("name")
+    if not name:
+        await query.edit_message_text(get_text("operation_failed", lang))
+        return
+    # Create org
+    async with async_session_maker() as session:
+        org = Organization(name=name, organization_type=OrganizationType(org_type), is_active=True, is_verified=True)
+        session.add(org)
+        await session.commit()
+    context.user_data.pop("add_org", None)
+    await query.edit_message_text(get_text("org_approved", lang).format(name=name))
+
+
+async def handle_admin_org_performance(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    lang = get_user_language(context)
+    await query.edit_message_text(get_text("org_performance", lang))
 
 
 async def show_admin_reports_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1880,6 +2664,86 @@ async def show_admin_reports_menu(update: Update, context: ContextTypes.DEFAULT_
     await update.message.reply_text(text, reply_markup=reply_markup)
 
 
+async def handle_admin_daily_report(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    lang = get_user_language(context)
+    # Today's stats
+    async with async_session_maker() as session:
+        from sqlalchemy import select, func
+        from datetime import datetime
+        today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0)
+        today_count = await session.scalar(select(func.count(Report.id)).where(Report.created_at >= today_start))
+        week_count = today_count
+        month_count = today_count
+        resolved = await session.scalar(select(func.count(Report.id)).where(Report.status == ReportStatus.RESOLVED).where(Report.created_at >= today_start))
+        pending = await session.scalar(select(func.count(Report.id)).where(Report.status.in_([ReportStatus.PENDING, ReportStatus.ACKNOWLEDGED])))
+    await query.edit_message_text(get_text("reports_summary", lang).format(today=today_count, week=week_count, month=month_count, resolved=resolved, pending=pending))
+
+
+async def handle_admin_weekly_report(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    lang = get_user_language(context)
+    async with async_session_maker() as session:
+        from sqlalchemy import select, func
+        from datetime import timedelta
+        week_start = datetime.now(timezone.utc) - timedelta(days=7)
+        week_count = await session.scalar(select(func.count(Report.id)).where(Report.created_at >= week_start))
+        today_count = await session.scalar(select(func.count(Report.id)).where(Report.created_at >= datetime.now(timezone.utc).replace(hour=0, minute=0, second=0)))
+        month_start = datetime.now(timezone.utc).replace(day=1, hour=0, minute=0, second=0)
+        month_count = await session.scalar(select(func.count(Report.id)).where(Report.created_at >= month_start))
+        resolved = await session.scalar(select(func.count(Report.id)).where(Report.status == ReportStatus.RESOLVED).where(Report.created_at >= week_start))
+        pending = await session.scalar(select(func.count(Report.id)).where(Report.status.in_([ReportStatus.PENDING, ReportStatus.ACKNOWLEDGED])))
+    await query.edit_message_text(get_text("reports_summary", lang).format(today=today_count, week=week_count, month=month_count, resolved=resolved, pending=pending))
+
+
+async def handle_admin_monthly_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    lang = get_user_language(context)
+    async with async_session_maker() as session:
+        from sqlalchemy import select, func
+        month_start = datetime.now(timezone.utc).replace(day=1, hour=0, minute=0, second=0)
+        month_count = await session.scalar(select(func.count(Report.id)).where(Report.created_at >= month_start))
+        today_count = await session.scalar(select(func.count(Report.id)).where(Report.created_at >= datetime.now(timezone.utc).replace(hour=0, minute=0, second=0)))
+        week_start = datetime.now(timezone.utc) - timedelta(days=7)
+        week_count = await session.scalar(select(func.count(Report.id)).where(Report.created_at >= week_start))
+        resolved = await session.scalar(select(func.count(Report.id)).where(Report.status == ReportStatus.RESOLVED).where(Report.created_at >= month_start))
+        pending = await session.scalar(select(func.count(Report.id)).where(Report.status.in_([ReportStatus.PENDING, ReportStatus.ACKNOWLEDGED])))
+    await query.edit_message_text(get_text("reports_summary", lang).format(today=today_count, week=week_count, month=month_count, resolved=resolved, pending=pending))
+
+
+async def handle_admin_export_data(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    lang = get_user_language(context)
+    # Export last 100 reports as CSV
+    async with async_session_maker() as session:
+        from sqlalchemy import select, desc
+        result = await session.execute(select(Report).order_by(desc(Report.created_at)).limit(100))
+        reports = result.scalars().all()
+    import csv
+    from io import StringIO
+    output = StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["public_id", "created_at", "city", "status", "urgency", "animal_type", "reporter_id", "assigned_organization_id"])
+    for r in reports:
+        writer.writerow([
+            r.public_id,
+            r.created_at.isoformat() if r.created_at else "",
+            r.city or "",
+            r.status.value,
+            r.urgency_level.value,
+            r.animal_type.value,
+            str(r.reporter_id),
+            str(r.assigned_organization_id) if r.assigned_organization_id else "",
+        ])
+    data = output.getvalue().encode("utf-8")
+    output.close()
+    await query.message.reply_document(document=BytesIO(data), filename="reports_export.csv", caption=get_text("export_data", lang))
+
+
 async def show_admin_settings_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Show admin system settings menu."""
     lang = get_user_language(context)
@@ -1915,6 +2779,170 @@ async def show_admin_settings_menu(update: Update, context: ContextTypes.DEFAULT
         get_text("system_settings_title", lang),
         reply_markup=reply_markup
     )
+
+
+async def handle_admin_maintenance(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    lang = get_user_language(context)
+    # Show current status and toggle buttons
+    key = "maintenance_mode"
+    current = False
+    try:
+        val = await redis_client.get(key)
+        current = bool(int(val)) if val is not None else False
+    except Exception:
+        current = False
+    status_text = get_text("maintenance_enabled", lang) if current else get_text("maintenance_disabled", lang)
+    keyboard = []
+    if current:
+        keyboard.append([InlineKeyboardButton(get_text("disable", lang), callback_data="admin_maintenance_disable")])
+    else:
+        keyboard.append([InlineKeyboardButton(get_text("enable", lang), callback_data="admin_maintenance_enable")])
+    await query.edit_message_text(f"{get_text('maintenance_mode', lang)}\n\n{status_text}", reply_markup=InlineKeyboardMarkup(keyboard))
+
+
+async def handle_admin_maintenance_enable(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    lang = get_user_language(context)
+    try:
+        await redis_client.set("maintenance_mode", 1)
+    except Exception:
+        pass
+    await query.edit_message_text(get_text("maintenance_enabled", lang))
+
+
+async def handle_admin_maintenance_disable(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    lang = get_user_language(context)
+    try:
+        await redis_client.set("maintenance_mode", 0)
+    except Exception:
+        pass
+    await query.edit_message_text(get_text("maintenance_disabled", lang))
+
+
+async def handle_admin_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    lang = get_user_language(context)
+    context.user_data["awaiting_broadcast"] = True
+    await query.edit_message_text(get_text("broadcast_instructions", lang))
+
+
+async def handle_admin_logs(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    lang = get_user_language(context)
+    await query.edit_message_text(get_text("feature_placeholder", lang).format(feature=get_text("system_logs", lang)))
+
+
+async def handle_admin_backup(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    lang = get_user_language(context)
+    await query.edit_message_text(get_text("feature_placeholder", lang).format(feature=get_text("backup_restore", lang)))
+
+
+async def handle_admin_broadcast_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not context.user_data.get("awaiting_broadcast"):
+        return
+    lang = get_user_language(context)
+    text = (getattr(update, 'message', None) and update.message.text or '').strip()
+    if not text:
+        await update.message.reply_text(get_text("invalid_input", lang))
+        return
+    # Send to up to N users
+    async with async_session_maker() as session:
+        from sqlalchemy import select
+        result = await session.execute(select(User.telegram_user_id).where(User.telegram_user_id.is_not(None)).limit(200))
+        rows = result.all()
+    sent = 0
+    for (chat_id,) in rows:
+        try:
+            if chat_id:
+                await context.bot.send_message(chat_id=chat_id, text=text)
+                sent += 1
+        except Exception:
+            continue
+    context.user_data.pop("awaiting_broadcast", None)
+    await update.message.reply_text(get_text("broadcast_sent", lang).format(count=sent))
+
+
+async def handle_admin_approve_org(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    lang = get_user_language(context)
+    org_id = query.data.replace("admin_approve_org_", "")
+    import uuid as _uuid
+    try:
+        org_uuid = _uuid.UUID(org_id)
+    except Exception:
+        await query.edit_message_text(get_text("operation_failed", lang))
+        return
+    async with async_session_maker() as session:
+        org = await session.get(Organization, org_uuid)
+        if not org:
+            await query.edit_message_text(get_text("operation_failed", lang))
+            return
+        org.is_verified = True
+        org.is_active = True
+        await session.commit()
+        name = org.name
+    await query.edit_message_text(get_text("org_approved", lang).format(name=name))
+
+
+async def handle_admin_reject_org(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    lang = get_user_language(context)
+    org_id = query.data.replace("admin_reject_org_", "")
+    import uuid as _uuid
+    try:
+        org_uuid = _uuid.UUID(org_id)
+    except Exception:
+        await query.edit_message_text(get_text("operation_failed", lang))
+        return
+    async with async_session_maker() as session:
+        org = await session.get(Organization, org_uuid)
+        if not org:
+            await query.edit_message_text(get_text("operation_failed", lang))
+            return
+        org.is_verified = False
+        org.is_active = False
+        await session.commit()
+        name = org.name
+    await query.edit_message_text(get_text("org_rejected", lang).format(name=name))
+
+
+async def handle_admin_view_org(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    lang = get_user_language(context)
+    org_id = query.data.replace("admin_view_org_", "")
+    import uuid as _uuid
+    try:
+        org_uuid = _uuid.UUID(org_id)
+    except Exception:
+        await query.edit_message_text(get_text("operation_failed", lang))
+        return
+    async with async_session_maker() as session:
+        org = await session.get(Organization, org_uuid)
+    if not org:
+        await query.edit_message_text(get_text("operation_failed", lang))
+        return
+    details = get_text("org_details", lang).format(
+        name=org.name,
+        location=org.city or org.address or get_text("location_unknown", lang),
+        phone=org.primary_phone or get_text("no", lang),
+        email=org.email or get_text("no", lang),
+        website=org.website or get_text("no", lang),
+        reports_count=org.total_reports_handled,
+        avg_response=int(org.average_response_time_minutes) if org.average_response_time_minutes else 0
+    )
+    await query.edit_message_text(details)
 
 
 # =============================================================================
@@ -2063,6 +3091,31 @@ def create_bot_application() -> Application:
     application.add_handler(CommandHandler("status", status_command))
     application.add_handler(CommandHandler("language", show_language_menu))
     
+    # Dev-only: promote current user to system admin and attach to first org
+    async def dev_promote(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        if settings.ENVIRONMENT == "production":
+            await update.message.reply_text("פקודה אינה זמינה בפרודקשן")
+            return
+        user = update.effective_user
+        db_user = await get_or_create_user(user)
+        async with async_session_maker() as session:
+            from sqlalchemy import select
+            # Ensure at least one org exists
+            result = await session.execute(select(Organization).limit(1))
+            org = result.scalar_one_or_none()
+            if not org:
+                org = Organization(name="Org for Admin", organization_type=OrganizationType.RESCUE_ORG, is_active=True)
+                session.add(org)
+                await session.flush()
+            # Promote
+            db_user = await session.get(User, db_user.id)
+            db_user.role = UserRole.SYSTEM_ADMIN
+            db_user.organization_id = org.id
+            await session.commit()
+        await update.message.reply_text("הוקצו הרשאות אדמין מערכת + שיוך לארגון ✅. שלח /start לרענון התפריט.")
+
+    application.add_handler(CommandHandler("dev_promote", dev_promote))
+    
     # Add conversation handler for report creation
     report_handler = create_report_conversation_handler()
     application.add_handler(report_handler)
@@ -2098,12 +3151,36 @@ def create_bot_application() -> Application:
         handle_notification_toggle, pattern="toggle_notif_.*"
     ))
     application.add_handler(CallbackQueryHandler(
+        handle_quiet_hours_settings, pattern="notif_quiet_hours"
+    ))
+    application.add_handler(CallbackQueryHandler(
+        handle_quiet_hours_set, pattern="quiet_hours_set"
+    ))
+    application.add_handler(CallbackQueryHandler(
+        handle_quiet_hours_disable, pattern="quiet_hours_disable"
+    ))
+    application.add_handler(CallbackQueryHandler(
         show_user_settings_menu, pattern="settings_menu"
+    ))
+    application.add_handler(CallbackQueryHandler(
+        handle_contact_update_phone, pattern="contact_update_phone"
+    ))
+    application.add_handler(CallbackQueryHandler(
+        handle_contact_update_email, pattern="contact_update_email"
+    ))
+    application.add_handler(CallbackQueryHandler(
+        handle_contact_emergency, pattern="contact_emergency"
+    ))
+    application.add_handler(CallbackQueryHandler(
+        handle_settings_back, pattern="settings_back"
     ))
     
     # Organization handlers
     application.add_handler(CallbackQueryHandler(
         handle_org_report_action, pattern="org_report_.*"
+    ))
+    application.add_handler(CallbackQueryHandler(
+        handle_org_report_details, pattern="org_details_.*"
     ))
     application.add_handler(CallbackQueryHandler(
         handle_org_acknowledge_report, pattern="org_ack_.*"
@@ -2113,6 +3190,9 @@ def create_bot_application() -> Application:
     ))
     application.add_handler(CallbackQueryHandler(
         handle_set_report_status, pattern="set_status_.*"
+    ))
+    application.add_handler(CallbackQueryHandler(
+        handle_org_reports_list, pattern="org_reports_list"
     ))
     
     # Add message handlers
@@ -2160,11 +3240,81 @@ def create_bot_application() -> Application:
         filters.Text(["🔧 הגדרות מערכת"]),
         show_admin_settings_menu
     ))
+
+    # Admin callback handlers
+    application.add_handler(CallbackQueryHandler(handle_admin_search_user, pattern="admin_search_user"))
+    application.add_handler(CallbackQueryHandler(handle_admin_list_users, pattern="admin_list_users"))
+    application.add_handler(CallbackQueryHandler(handle_admin_manage_roles, pattern="admin_manage_roles"))
+    application.add_handler(CallbackQueryHandler(handle_admin_blocked_users, pattern="admin_blocked_users"))
+    application.add_handler(CallbackQueryHandler(handle_admin_view_user, pattern="admin_view_user_.*"))
+    application.add_handler(CallbackQueryHandler(handle_admin_roles, pattern="admin_roles_.*"))
+    application.add_handler(CallbackQueryHandler(handle_admin_set_role, pattern="admin_set_role_.*"))
+    application.add_handler(CallbackQueryHandler(handle_admin_assign_org, pattern="admin_assign_org_.*"))
+    application.add_handler(CallbackQueryHandler(handle_admin_pending_orgs, pattern="admin_pending_orgs"))
+    application.add_handler(CallbackQueryHandler(handle_admin_active_orgs, pattern="admin_active_orgs"))
+    application.add_handler(CallbackQueryHandler(handle_admin_add_org, pattern="admin_add_org"))
+    application.add_handler(CallbackQueryHandler(handle_admin_add_org_type, pattern="admin_add_org_type_.*"))
+    application.add_handler(CallbackQueryHandler(handle_admin_import_google, pattern="admin_import_google"))
+    application.add_handler(CallbackQueryHandler(handle_admin_import_location, pattern="admin_import_location"))
+    application.add_handler(CallbackQueryHandler(handle_admin_manage_import_cities, pattern="admin_import_cities"))
+    application.add_handler(CallbackQueryHandler(handle_admin_import_cities_add, pattern="admin_import_cities_add"))
+    application.add_handler(CallbackQueryHandler(handle_admin_import_cities_remove, pattern="admin_import_cities_remove"))
+    application.add_handler(CallbackQueryHandler(handle_admin_import_cities_run, pattern="admin_import_cities_run"))
+    application.add_handler(CallbackQueryHandler(handle_admin_geocode_orgs, pattern="admin_geocode_orgs"))
+    application.add_handler(CallbackQueryHandler(handle_admin_org_performance, pattern="admin_org_performance"))
+    application.add_handler(CallbackQueryHandler(handle_admin_daily_report, pattern="admin_daily_report"))
+    application.add_handler(CallbackQueryHandler(handle_admin_weekly_report, pattern="admin_weekly_report"))
+    application.add_handler(CallbackQueryHandler(handle_admin_monthly_stats, pattern="admin_monthly_stats"))
+    application.add_handler(CallbackQueryHandler(handle_admin_export_data, pattern="admin_export_data"))
+    application.add_handler(CallbackQueryHandler(handle_admin_maintenance, pattern="admin_maintenance$"))
+    application.add_handler(CallbackQueryHandler(handle_admin_maintenance_enable, pattern="admin_maintenance_enable"))
+    application.add_handler(CallbackQueryHandler(handle_admin_maintenance_disable, pattern="admin_maintenance_disable"))
+    application.add_handler(CallbackQueryHandler(handle_admin_broadcast, pattern="admin_broadcast"))
+    application.add_handler(CallbackQueryHandler(handle_admin_logs, pattern="admin_logs"))
+    application.add_handler(CallbackQueryHandler(handle_admin_backup, pattern="admin_backup"))
     
     # Handle location messages for service area setup
     application.add_handler(MessageHandler(
         filters.LOCATION,
         handle_service_area_location
+    ))
+    # Handle text inputs for quiet hours and contact details
+    application.add_handler(MessageHandler(
+        filters.TEXT & ~filters.COMMAND,
+        handle_quiet_hours_input
+    ))
+    application.add_handler(MessageHandler(
+        filters.TEXT & ~filters.COMMAND,
+        handle_phone_input
+    ))
+    application.add_handler(MessageHandler(
+        filters.TEXT & ~filters.COMMAND,
+        handle_email_input
+    ))
+    # Admin text inputs
+    application.add_handler(MessageHandler(
+        filters.TEXT & ~filters.COMMAND,
+        handle_admin_search_input
+    ))
+    application.add_handler(MessageHandler(
+        filters.TEXT & ~filters.COMMAND,
+        handle_admin_add_org_name_input
+    ))
+    application.add_handler(MessageHandler(
+        filters.TEXT & ~filters.COMMAND,
+        handle_admin_broadcast_input
+    ))
+    application.add_handler(MessageHandler(
+        filters.TEXT & ~filters.COMMAND,
+        handle_admin_import_google_input
+    ))
+    application.add_handler(MessageHandler(
+        (filters.TEXT | filters.LOCATION) & ~filters.COMMAND,
+        handle_admin_import_location_inputs
+    ))
+    application.add_handler(MessageHandler(
+        filters.TEXT & ~filters.COMMAND,
+        handle_admin_import_cities_inputs
     ))
     
     # Error handler
@@ -2225,6 +3375,16 @@ async def handle_report_sharing(update: Update, context: ContextTypes.DEFAULT_TY
     )
     
     await query.message.reply_text(share_text, parse_mode=ParseMode.HTML)
+
+
+async def handle_settings_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Return from settings inline menu back to main keyboard menu."""
+    query = update.callback_query
+    await query.answer()
+    try:
+        await start_command(update, context)
+    except Exception:
+        pass
 
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:

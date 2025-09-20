@@ -161,6 +161,70 @@
      curl "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/getWebhookInfo"
      ```
 
+### פריסה ב־Render (מעודכן)
+
+ב־Render יש להקים שני שירותים עיקריים + שירותים מנוהלים:
+
+1) Web Service (FastAPI + Webhook טלגרם)
+- Build Command:
+```bash
+pip install -r requirements.txt
+```
+- Start Command:
+```bash
+uvicorn app.main:app --host 0.0.0.0 --port $PORT
+```
+- Port: השאירו ברירת מחדל של Render (המשתנה $PORT מוזרק אוטומטית)
+
+משתני סביבה עיקריים (Environment):
+- TELEGRAM_BOT_TOKEN
+- WEBHOOK_HOST (למשל: https://<your-app>.onrender.com)
+- TELEGRAM_WEBHOOK_SECRET (מחרוזת אקראית)
+- DATABASE_URL (Postgres)
+- REDIS_URL (Redis)
+- ENVIRONMENT=production
+- ENABLE_WORKERS=false (לשירות ה-Web)
+- GOOGLE_PLACES_API_KEY (חיוני)
+- GOOGLE_GEOCODING_API_KEY (אופציונלי; אם לא, נשתמש ב-Places)
+
+2) Background Worker (RQ Workers + Scheduler)
+- Build Command:
+```bash
+pip install -r requirements.txt
+```
+- Start Command:
+```bash
+python -c "from app.workers.manager import run_workers_cli; run_workers_cli()"
+```
+
+משתני סביבה לשירות ה-Worker:
+- DATABASE_URL, REDIS_URL (כמו ב-Web)
+- ENVIRONMENT=production
+- ENABLE_WORKERS=true
+- WORKER_PROCESSES=2 (לפי עומס)
+- WORKER_TIMEOUT=300 (אופציונלי)
+- GOOGLE_PLACES_API_KEY / GOOGLE_GEOCODING_API_KEY (לסנכרוני Places/Geocoding)
+
+3) שירותים מנוהלים
+- Render PostgreSQL → חשפו `DATABASE_URL`
+- Render Redis → חשפו `REDIS_URL`
+
+הערות חשובות:
+- Webhook: המערכת מגדירה Webhook אוטומטית אם `WEBHOOK_HOST` מוגדר; ודאו ש-HTTPS פעיל וש-`TELEGRAM_WEBHOOK_SECRET` מוגדר.
+- יצירת טבלאות (אופציונלי, אם אין Alembic): Post-deploy Command חד-פעמי:
+```bash
+python -c "import asyncio; from app.models.database import create_tables; asyncio.run(create_tables())"
+```
+- סקיילינג: 
+  - Web: הגדילו instances לפי עומס
+  - Workers: הגדילו WORKER_PROCESSES/Instances לפי תורים
+
+בדיקות זריזות לאחר פריסה:
+- /health מחזיר תקין
+- /api/v1/openapi.json נטען (אם SHOW_DOCS דלוק)
+- בוט מגיב ל-/start
+- לחצן "🏢 ניהול ארגונים" מציג אפשרויות ייבוא וסנכרון
+
 ### פריסה ב־Render
 
 ב־[Render](https://render.com/) יש להקים שני שירותים עיקריים:
