@@ -34,6 +34,7 @@ from app.services.google import GoogleService
 from app.services.nlp import NLPService
 from app.services.email import EmailService
 from app.services.telegram_alerts import TelegramAlertsService
+from app.services.sms import get_sms_service
 from app.core.i18n import get_text
 
 # =============================================================================
@@ -570,8 +571,17 @@ async def _send_organization_alert_async(
                     organization=organization
                 )
             elif channel == "sms":
-                # SMS implementation would go here
-                result = {"status": "not_implemented"}
+                try:
+                    sms_service = get_sms_service()
+                    sms_text = message_data["message"]
+                    sms_res = await sms_service.send(recipient, sms_text)
+                    result = {
+                        "status": sms_res.status,
+                        "external_id": sms_res.external_id,
+                        "error": sms_res.error,
+                    }
+                except Exception as e:
+                    result = {"status": "failed", "error": str(e)}
             
             if result and result.get("status") == "success":
                 alert.status = AlertStatus.SENT

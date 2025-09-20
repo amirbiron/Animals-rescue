@@ -269,6 +269,14 @@ class Settings(BaseSettings):
     # Email addresses
     EMAILS_FROM_EMAIL: Optional[EmailStr] = Field(default=None)
     EMAILS_FROM_NAME: str = Field(default="Animal Rescue Bot")
+
+    # =========================================================================
+    # SMS / WhatsApp Configuration (Twilio)
+    # =========================================================================
+    TWILIO_ACCOUNT_SID: Optional[str] = Field(default=None, description="Twilio Account SID")
+    TWILIO_AUTH_TOKEN: Optional[str] = Field(default=None, description="Twilio Auth Token")
+    TWILIO_SMS_FROM: Optional[str] = Field(default=None, description="Twilio sender phone in E.164, e.g. +972...")
+    TWILIO_WHATSAPP_FROM: Optional[str] = Field(default=None, description="Twilio WhatsApp sender, e.g. whatsapp:+972...")
     
     # =========================================================================
     # Logging and Monitoring
