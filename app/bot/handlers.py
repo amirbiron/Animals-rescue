@@ -366,6 +366,7 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 select(Report)
                 .join(User)
                 .where(User.telegram_user_id == user.id)
+                .where(Report.status != ReportStatus.CLOSED)
                 .order_by(desc(Report.created_at))
                 .limit(5)
             )
@@ -420,6 +421,76 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await update.message.reply_text(
             get_text("error_generic", lang)
         )
+
+
+async def handle_detailed_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show a detailed view of recent reports with actions per report."""
+    query = update.callback_query
+    await query.answer()
+    lang = get_user_language(context)
+    user = update.effective_user
+
+    async with async_session_maker() as session:
+        from sqlalchemy import select, desc
+        result = await session.execute(
+            select(Report)
+            .join(User)
+            .where(User.telegram_user_id == user.id)
+            .where(Report.status != ReportStatus.CLOSED)
+            .order_by(desc(Report.created_at))
+            .limit(5)
+        )
+        reports = result.scalars().all()
+
+    if not reports:
+        await query.edit_message_text(get_text("no_reports_found", lang))
+        return
+
+    text_lines = [get_text("your_recent_reports", lang), ""]
+    keyboard = []
+    for r in reports:
+        text_lines.append(f"#{r.public_id} — {get_text(f'status_{r.status.value}', lang)} · {r.created_at.strftime('%d/%m %H:%M')}")
+        text_lines.append(f"📍 {r.city or get_text('location_unknown', lang)} · 🔥 {get_text(f'urgency_{r.urgency_level.value}', lang)}")
+        keyboard.append([
+            InlineKeyboardButton(get_text("track_report", lang), callback_data=f"track_{r.public_id}"),
+            InlineKeyboardButton(get_text("share_report", lang), callback_data=f"share_{r.public_id}"),
+            InlineKeyboardButton("🗑️ מחק דיווח", callback_data=f"delete_report_{r.public_id}")
+        ])
+        text_lines.append("")
+
+    await query.edit_message_text("\n".join(text_lines), reply_markup=InlineKeyboardMarkup(keyboard))
+
+
+async def handle_delete_report(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Allow user to delete their own report if not yet in progress."""
+    query = update.callback_query
+    await query.answer()
+    lang = get_user_language(context)
+    public_id = query.data.replace("delete_report_", "")
+    db_user = await get_or_create_user(update.effective_user)
+
+    async with async_session_maker() as session:
+        from sqlalchemy import select
+        result = await session.execute(select(Report).where(Report.public_id == public_id))
+        report = result.scalar_one_or_none()
+        if not report:
+            await query.edit_message_text(get_text("report_not_found", lang))
+            return
+        if report.reporter_id != db_user.id:
+            await query.edit_message_text(get_text("permission_denied", lang))
+            return
+        if report.status not in [ReportStatus.SUBMITTED, ReportStatus.PENDING]:
+            await query.edit_message_text("לא ניתן למחוק דיווח לאחר שהטיפול החל.")
+            return
+        report.status = ReportStatus.CLOSED
+        try:
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            await query.edit_message_text(get_text("operation_failed", lang))
+            return
+
+    await query.edit_message_text("הדיווח נמחק ✅")
 
 
 # =============================================================================
@@ -2490,6 +2561,11 @@ async def handle_admin_import_google_input(update: Update, context: ContextTypes
     if not city:
         await update.message.reply_text(get_text("invalid_input", lang))
         return
+    # Immediate feedback that import has started
+    try:
+        await update.message.reply_text("מבצע ייבוא... זה עלול לקחת עד כדקה ⏳")
+    except Exception:
+        pass
     from app.services.google import GoogleService
     google = GoogleService()
     created = 0
@@ -2759,6 +2835,34 @@ async def handle_admin_add_org_name_input(update: Update, context: ContextTypes.
     await update.message.reply_text(get_text("select_org_type", lang), reply_markup=InlineKeyboardMarkup(keyboard))
 
 
+async def handle_admin_add_org_email_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Collect organization email and create the organization."""
+    if not context.user_data.get("add_org") or context.user_data.get("add_org", {}).get("step") != "email":
+        return
+    lang = get_user_language(context)
+    text = (getattr(update, 'message', None) and update.message.text or '').strip()
+    import re as _re
+    if not _re.match(r"^[^\s@]+@[^\s@]+\.[^\s@]+$", text):
+        await update.message.reply_text(get_text("invalid_email", lang))
+        return
+    add_ctx = context.user_data.get("add_org", {})
+    name = add_ctx.get("name")
+    org_type = add_ctx.get("org_type")
+    async with async_session_maker() as session:
+        org = Organization(
+            name=name,
+            organization_type=OrganizationType(org_type),
+            email=text,
+            alert_channels=["email"],
+            is_active=True,
+            is_verified=True,
+        )
+        session.add(org)
+        await session.commit()
+    context.user_data.pop("add_org", None)
+    await update.message.reply_text(get_text("org_approved", lang).format(name=name))
+
+
 async def handle_admin_add_org_type(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not context.user_data.get("add_org") or context.user_data.get("add_org", {}).get("step") != "type":
         return
@@ -2770,13 +2874,9 @@ async def handle_admin_add_org_type(update: Update, context: ContextTypes.DEFAUL
     if not name:
         await query.edit_message_text(get_text("operation_failed", lang))
         return
-    # Create org
-    async with async_session_maker() as session:
-        org = Organization(name=name, organization_type=OrganizationType(org_type), is_active=True, is_verified=True)
-        session.add(org)
-        await session.commit()
-    context.user_data.pop("add_org", None)
-    await query.edit_message_text(get_text("org_approved", lang).format(name=name))
+    # Move to email collection step before creation
+    context.user_data["add_org"] = {"step": "email", "name": name, "org_type": org_type}
+    await query.edit_message_text(get_text("email_instructions", lang))
 
 
 async def handle_admin_org_performance(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -3515,6 +3615,11 @@ def create_bot_application() -> Application:
         filters.TEXT & ~filters.COMMAND,
         handle_admin_import_google_input
     ))
+    # Admin add organization email input
+    application.add_handler(MessageHandler(
+        filters.TEXT & ~filters.COMMAND,
+        handle_admin_add_org_email_input
+    ))
     application.add_handler(MessageHandler(
         (filters.TEXT | filters.LOCATION) & ~filters.COMMAND,
         handle_admin_import_location_inputs
@@ -3524,6 +3629,14 @@ def create_bot_application() -> Application:
         handle_admin_import_cities_inputs
     ))
     
+    # Detailed status and delete handlers
+    application.add_handler(CallbackQueryHandler(
+        handle_detailed_status, pattern="^detailed_status$"
+    ))
+    application.add_handler(CallbackQueryHandler(
+        handle_delete_report, pattern="^delete_report_.*$"
+    ))
+
     # Error handler
     application.add_error_handler(error_handler)
     

@@ -83,6 +83,9 @@ psutil==5.9.8                        # System metrics (used by workers manager)
 # Retry utilities (used by app.services.google)
 tenacity==9.0.0
 
+# SMS / WhatsApp providers
+twilio==9.3.0
+
 
 
 # =============================================================================

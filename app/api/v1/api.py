@@ -10,6 +10,7 @@ from fastapi import APIRouter
 
 from app.api.v1.reports import router as reports_router
 from app.core.config import settings
+from app.api.v1.twilio_webhook import router as twilio_router
 
 # =============================================================================
 # Main API Router
@@ -32,6 +33,13 @@ api_router.include_router(
         429: {"description": "Rate limit exceeded"},
         500: {"description": "Internal server error"},
     },
+)
+
+# Twilio inbound webhook (SMS/WhatsApp)
+api_router.include_router(
+    twilio_router,
+    prefix="/twilio",
+    tags=["integrations"],
 )
 
 # Health check endpoint (simple)
