@@ -47,7 +47,7 @@ from app.services.nlp import NLPService
 from app.services.geocoding import GeocodingService
 from app.services.file_storage import FileStorageService
 from app.workers.jobs import process_new_report, enqueue_or_run
-from app.core.i18n import get_text, detect_language, set_user_language
+from app.core.i18n import get_text, detect_language, set_user_language, get_user_language as i18n_get_user_language
 
 # =============================================================================
 # Constants and State Management
@@ -184,30 +184,39 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         # Get or create user in database
         db_user = await get_or_create_user(user)
         
-        # Detect and set user language
-        detected_lang = detect_language(update.message.text) or user.language_code or "he"
-        await set_user_language(db_user.id, detected_lang)
-        context.user_data[USER_DATA_KEYS["language"]] = detected_lang
+        # Determine preferred language (default Hebrew)
+        # 1) Use previously saved preference if exists
+        # 2) Else use Telegram user language if supported
+        # 3) Else fall back to DEFAULT_LANGUAGE (Hebrew)
+        try:
+            prev_lang = await i18n_get_user_language(db_user.id)
+        except Exception:
+            prev_lang = settings.DEFAULT_LANGUAGE
+        telegram_lang = (user.language_code or "").lower() if getattr(user, "language_code", None) else None
+        supported = set(settings.SUPPORTED_LANGUAGES)
+        preferred_lang = prev_lang if prev_lang in supported else (telegram_lang if telegram_lang in supported else settings.DEFAULT_LANGUAGE)
+        await set_user_language(db_user.id, preferred_lang)
+        context.user_data[USER_DATA_KEYS["language"]] = preferred_lang
         
         # Show typing indicator
         await set_typing_action(update, context)
         
         # Welcome message
-        welcome_text = get_text("welcome_message", detected_lang).format(
+        welcome_text = get_text("welcome_message", preferred_lang).format(
             name=user.first_name or "משתמש",
             app_name=settings.APP_NAME
         )
         
         # Main menu keyboard
         keyboard = [
-            [KeyboardButton(get_text("report_new_incident", detected_lang))],
+            [KeyboardButton(get_text("report_new_incident", preferred_lang))],
             [
-                KeyboardButton(get_text("my_reports", detected_lang)),
-                KeyboardButton(get_text("help", detected_lang))
+                KeyboardButton(get_text("my_reports", preferred_lang)),
+                KeyboardButton(get_text("help", preferred_lang))
             ],
             [
-                KeyboardButton(get_text("change_language", detected_lang)),
-                KeyboardButton(get_text("contact_emergency", detected_lang))
+                KeyboardButton(get_text("change_language", preferred_lang)),
+                KeyboardButton(get_text("contact_emergency", preferred_lang))
             ]
         ]
         
@@ -960,6 +969,68 @@ async def submit_report(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
 
 
 # =============================================================================
+# Language Selection Handlers
+# =============================================================================
+
+async def show_language_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show language selection menu."""
+    lang = get_user_language(context)
+    buttons = [
+        [InlineKeyboardButton("🇮🇱 עברית", callback_data="set_lang_he")],
+        [InlineKeyboardButton("English", callback_data="set_lang_en")],
+        [InlineKeyboardButton("العربية", callback_data="set_lang_ar")],
+    ]
+    reply_markup = InlineKeyboardMarkup(buttons)
+    prompt = get_text("language_select_title", lang)
+    if update.message:
+        await update.message.reply_text(prompt, reply_markup=reply_markup)
+    elif update.callback_query:
+        await update.callback_query.edit_message_text(prompt, reply_markup=reply_markup)
+
+
+async def handle_language_selection(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle language selection callback and update preference."""
+    query = update.callback_query
+    await query.answer()
+    data = query.data or ""
+    if not data.startswith("set_lang_"):
+        return
+    lang_code = data.replace("set_lang_", "")
+    if lang_code not in {"he", "en", "ar"}:
+        return
+    # Persist preference
+    db_user = await get_or_create_user(update.effective_user)
+    await set_user_language(db_user.id, lang_code)
+    context.user_data[USER_DATA_KEYS["language"]] = lang_code
+
+    lang_names = {"he": "עברית", "en": "English", "ar": "العربية"}
+    ack = get_text("language_changed", lang_code).format(language=lang_names.get(lang_code, lang_code))
+    try:
+        await query.edit_message_text(ack)
+    except Exception:
+        await query.message.reply_text(ack)
+
+    # Send updated main menu in the selected language
+    keyboard = [
+        [KeyboardButton(get_text("report_new_incident", lang_code))],
+        [
+            KeyboardButton(get_text("my_reports", lang_code)),
+            KeyboardButton(get_text("help", lang_code)),
+        ],
+        [
+            KeyboardButton(get_text("change_language", lang_code)),
+            KeyboardButton(get_text("contact_emergency", lang_code)),
+        ],
+    ]
+    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=False)
+    welcome = get_text("welcome_message", lang_code).format(
+        name=update.effective_user.first_name or "משתמש",
+        app_name=settings.APP_NAME,
+    )
+    await query.message.reply_text(welcome, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
+
+
+# =============================================================================
 # Conversation Handler Setup
 # =============================================================================
 
@@ -1041,6 +1112,7 @@ def create_bot_application() -> Application:
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("status", status_command))
+    application.add_handler(CommandHandler("language", show_language_menu))
     
     # Add conversation handler for report creation
     report_handler = create_report_conversation_handler()
@@ -1053,6 +1125,9 @@ def create_bot_application() -> Application:
     application.add_handler(CallbackQueryHandler(
         handle_report_sharing, pattern="share_.*"  
     ))
+    application.add_handler(CallbackQueryHandler(
+        handle_language_selection, pattern="^set_lang_.*$"
+    ))
     
     # Add message handlers
     application.add_handler(MessageHandler(
@@ -1062,6 +1137,10 @@ def create_bot_application() -> Application:
     application.add_handler(MessageHandler(
         filters.Text(["הדיווחים שלי", "My Reports", "تقاريري"]),
         status_command
+    ))
+    application.add_handler(MessageHandler(
+        filters.Text(["שינוי שפה", "Change Language", "تغيير اللغة"]),
+        show_language_menu
     ))
     
     # Error handler
