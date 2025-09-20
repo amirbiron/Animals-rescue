@@ -209,6 +209,8 @@
   "pending_org_approvals": "🕐 ארגונים ממתינים לאישור",
   "active_organizations": "✅ ארגונים פעילים",
   "add_organization": "➕ הוסף ארגון חדש",
+  "prompt_org_name": "הכנס שם ארגון חדש:",
+  "select_org_type": "בחר סוג ארגון:",
   "org_performance": "📈 ביצועי ארגונים",
   "approve_organization": "אשר ארגון",
   "reject_organization": "דחה בקשה",

@@ -2739,7 +2739,7 @@ async def handle_admin_add_org(update: Update, context: ContextTypes.DEFAULT_TYP
     await query.answer()
     lang = get_user_language(context)
     context.user_data["add_org"] = {"step": "name"}
-    await query.edit_message_text(get_text("add_organization", lang) + "\n\n" + get_text("enter_address_manually", lang))
+    await query.edit_message_text(get_text("add_organization", lang) + "\n\n" + get_text("prompt_org_name", lang))
 
 
 async def handle_admin_add_org_name_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -2755,7 +2755,7 @@ async def handle_admin_add_org_name_input(update: Update, context: ContextTypes.
     keyboard = []
     for t in [OrganizationType.VET_CLINIC, OrganizationType.EMERGENCY_VET, OrganizationType.ANIMAL_HOSPITAL, OrganizationType.ANIMAL_SHELTER, OrganizationType.RESCUE_ORG, OrganizationType.GOVERNMENT, OrganizationType.VOLUNTEER_GROUP]:
         keyboard.append([InlineKeyboardButton(t.value, callback_data=f"admin_add_org_type_{t.value}")])
-    await update.message.reply_text(get_text("orgs_management_title", lang), reply_markup=InlineKeyboardMarkup(keyboard))
+    await update.message.reply_text(get_text("select_org_type", lang), reply_markup=InlineKeyboardMarkup(keyboard))
 
 
 async def handle_admin_add_org_type(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
