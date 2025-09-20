@@ -166,6 +166,28 @@ class Settings(BaseSettings):
     # Rate limiting for bot
     TELEGRAM_RATE_LIMIT_MESSAGES: int = Field(default=20, description="Messages per minute per user")
     TELEGRAM_RATE_LIMIT_WINDOW: int = Field(default=60, description="Rate limit window in seconds")
+
+    # Polling lock (to avoid multiple getUpdates instances)
+    POLLING_LOCK_KEY: str = Field(
+        default="bot:polling_lock",
+        description="Redis key for distributed polling lock"
+    )
+    LOCK_LEASE_SECONDS: int = Field(
+        default=60,
+        description="Lease duration for polling lock (seconds)"
+    )
+    LOCK_HEARTBEAT_INTERVAL: Optional[int] = Field(
+        default=None,
+        description="Heartbeat interval to renew polling lock (seconds)"
+    )
+    LOCK_WAIT_FOR_ACQUIRE: bool = Field(
+        default=False,
+        description="Whether to wait for lock acquisition at startup"
+    )
+    LOCK_ACQUIRE_MAX_WAIT: int = Field(
+        default=0,
+        description="Max seconds to wait for lock when waiting (0 = unlimited)"
+    )
     
     # =========================================================================
     # External APIs Configuration
@@ -335,6 +357,15 @@ class Settings(BaseSettings):
             for field in email_fields:
                 if not getattr(self, field):
                     raise ValueError(f"{field} is required when email is configured")
+        return self
+
+    @model_validator(mode='after')
+    def _normalize_lock_intervals(self) -> 'Settings':
+        """Compute sensible defaults for lock heartbeat interval."""
+        hb = self.LOCK_HEARTBEAT_INTERVAL
+        if not hb or hb <= 0:
+            computed = max(5, int(self.LOCK_LEASE_SECONDS * 0.4))
+            object.__setattr__(self, "LOCK_HEARTBEAT_INTERVAL", computed)
         return self
     
     # =========================================================================

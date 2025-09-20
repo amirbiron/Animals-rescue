@@ -1189,10 +1189,80 @@ async def start_polling_if_needed() -> bool:
         pass
     await bot_application.start()
 
+    # Acquire distributed polling lock to ensure single getUpdates instance
+    lock_key = settings.POLLING_LOCK_KEY
+    lease = settings.LOCK_LEASE_SECONDS
+    hb_interval = settings.LOCK_HEARTBEAT_INTERVAL
+
+    async def _heartbeat(identifier: str):
+        try:
+            while _polling_task and not _polling_task.done():
+                # Renew lock only if owned by this identifier
+                lua = """
+                local k=KEYS[1]
+                local id=ARGV[1]
+                local ttl=tonumber(ARGV[2])
+                if redis.call('GET', k) == id then
+                    return redis.call('EXPIRE', k, ttl)
+                else
+                    return 0
+                end
+                """
+                try:
+                    res = await redis_client.eval(lua, 1, lock_key, identifier, lease)
+                except Exception:
+                    res = 0
+                if not res:
+                    # Lock lost → stop polling immediately
+                    logger.warning("Polling lock lost, stopping polling")
+                    try:
+                        if getattr(bot_application, "updater", None):
+                            await bot_application.updater.stop()
+                    except Exception:
+                        pass
+                    break
+                await asyncio.sleep(hb_interval)
+        except Exception:
+            pass
+
+    async def _acquire_lock(max_wait: int | None) -> str | None:
+        start = asyncio.get_event_loop().time()
+        identifier = f"{id(bot_application)}:{start}"
+        while True:
+            try:
+                acquired = await redis_client.set(lock_key, identifier, nx=True, ex=lease)
+            except Exception:
+                acquired = False
+            if acquired:
+                return identifier
+            if not settings.LOCK_WAIT_FOR_ACQUIRE:
+                # Passive wait with random backoff
+                import random
+                wait_min = int(os.getenv("LOCK_WAIT_MIN_SECONDS", "15"))
+                wait_max = int(os.getenv("LOCK_WAIT_MAX_SECONDS", "45"))
+                delay = random.randint(wait_min, max(wait_min, wait_max))
+                logger.info("Polling lock busy; sleeping", seconds=delay)
+                await asyncio.sleep(delay)
+            else:
+                if max_wait and (asyncio.get_event_loop().time() - start) > max_wait:
+                    return None
+                await asyncio.sleep(2)
+
+    import asyncio, os as _os
+    import os
+    max_wait = settings.LOCK_ACQUIRE_MAX_WAIT if settings.LOCK_WAIT_FOR_ACQUIRE else 0
+    lock_id = await _acquire_lock(max_wait if max_wait and max_wait > 0 else None)
+    if lock_id is None:
+        logger.info("Polling lock not acquired within limit; skipping polling")
+        return False
+
     # Run polling without blocking the event loop
     import asyncio as _asyncio
     _polling_task = _asyncio.create_task(bot_application.updater.start_polling())
-    logger.info("📡 Telegram polling started")
+    # Start heartbeat renewer
+    _asyncio.create_task(_heartbeat(lock_id))
+
+    logger.info("📡 Telegram polling started (with distributed lock)")
     return True
 
 

@@ -2,6 +2,67 @@
   "bot.start_message": "مرحبًا بكم في Animal Rescue Bot! أرسل /help للأوامر.",
   "bot.help_message": "استخدم /new_report لإنشاء بلاغ إنقاذ جديد.",
   "bot.error.general": "حدث خطأ. يرجى المحاولة مرة أخرى.",
+  "welcome_message": "مرحبًا {name}! أهلًا بك في {app_name}. كيف أساعدك؟",
+  "report_new_incident": "🚨 تقرير جديد",
+  "my_reports": "تقاريري",
+  "help": "مساعدة",
+  "change_language": "تغيير اللغة",
+  "contact_emergency": "جهات طوارئ",
+  "rate_limit_exceeded": "طلبات كثيرة. حاول بعد قليل.",
+  "error_generic": "حدث خطأ. حاول لاحقًا.",
+  "help_text": "يمكنك الإبلاغ عن حيوان بحاجة للمساعدة بعدة خطوات.",
+  "emergency_contacts": "في حالات الطوارئ الخطيرة اتصل بطبيب بيطري/البلدية فورًا.",
+  "no_reports_found": "لا توجد تقارير سابقة.",
+  "your_recent_reports": "تقاريرك الأخيرة:",
+  "view_detailed_status": "عرض الحالة بالتفصيل",
+  "request_photo_instructions": "أرسل صورة للحيوان الآن.",
+  "add_another_photo": "أضف صورة أخرى",
+  "continue_with_location": "متابعة إلى الموقع",
+  "photo_uploaded_success": "تم حفظ الصورة ({current}/{max}).",
+  "max_photos_reached": "تم الوصول للحد الأقصى للصور.",
+  "error_photo_upload": "فشل رفع الصورة.",
+  "request_location_instructions": "شارك موقع GPS أو اكتب عنوانًا.",
+  "share_location": "مشاركة الموقع",
+  "enter_address_manually": "إدخال العنوان يدويًا",
+  "address_unavailable": "العنوان غير متاح",
+  "address_not_found": "لم نعثر على هذا العنوان.",
+  "error_geocoding": "خطأ في تحديد العنوان.",
+  "location_confirmed": "تم تأكيد الموقع: {address} · المدينة: {city}",
+  "coordinates_only": "إحداثيات فقط",
+  "unknown_city": "مدينة غير معروفة",
+  "error_location": "خطأ في معالجة الموقع.",
+  "request_description_instructions": "صف الحالة باختصار وما المطلوب.",
+  "description_too_short": "الوصف قصير جدًا.",
+  "nlp_analysis_results": "قمنا بتحليل النص:\nالعنوان: {title}\nالدعوة: {urgency}\nالنوع: {animal_type}",
+  "correct_continue": "صحيح، متابعة",
+  "modify_urgency": "تغيير الدعوة",
+  "modify_animal_type": "تغيير النوع",
+  "select_urgency_level": "اختر مستوى الدعوة",
+  "select_animal_type": "اختر نوع الحيوان",
+  "report_submitted_success": "تم إرسال البلاغ! المعرف: {report_id}\nالدعوة: {urgency}\nالنوع: {animal_type}",
+  "track_report": "تتبع البلاغ",
+  "share_report": "مشاركة البلاغ",
+  "error_submit_report": "تعذر إرسال البلاغ.",
+  "conversation_cancelled": "تم إلغاء العملية.",
+  "report_not_found": "البلاغ غير موجود.",
+  "report_status_details": "بلاغ {report_id}\nالحالة: {status}\nالإنشاء: {created}\nالموقع: {location}",
+  "location_unknown": "موقع غير معروف",
+  "share_report_text": "يمكنك مشاركة البلاغ: {url}",
+  "urgency_low": "منخفض",
+  "urgency_medium": "متوسط",
+  "urgency_high": "مرتفع",
+  "urgency_critical": "حرج",
+  "animal_dog": "كلب",
+  "animal_cat": "قط",
+  "animal_bird": "طائر",
+  "animal_wildlife": "حيوان بري",
+  "animal_other": "آخر",
+  "status_submitted": "تم الاستلام",
+  "status_pending": "قيد الانتظار",
+  "status_acknowledged": "تمت المراجعة",
+  "status_in_progress": "قيد المعالجة",
+  "status_resolved": "تم الحل",
+  "status_closed": "مغلق",
 
   "api.success": "تمت العملية بنجاح",
   "api.error": "حدث خطأ",
