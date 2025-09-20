@@ -225,9 +225,15 @@ async def lifespan(app: FastAPI):
     # Initialize Telegram bot
     if not settings.is_testing:
         try:
-            from app.bot.handlers import bot, initialize_bot
+            from app.bot.handlers import bot, initialize_bot, start_polling_if_needed
             await initialize_bot()
             logger.info("🤖 Telegram bot initialized")
+            try:
+                started = await start_polling_if_needed()
+                if started:
+                    logger.info("📡 Telegram polling started (webhook not configured)")
+            except Exception as e:
+                logger.error("❌ Telegram polling start failed", error=str(e))
         except Exception as e:
             logger.error("❌ Telegram bot initialization failed", error=str(e))
     
@@ -250,6 +256,13 @@ async def lifespan(app: FastAPI):
         from app.core.cache import redis_client
         await redis_client.close()
         logger.info("📊 Redis connection closed")
+        # Stop Telegram bot/polling gracefully
+        try:
+            from app.bot.handlers import shutdown_bot
+            await shutdown_bot()
+            logger.info("🤖 Telegram bot shutdown completed")
+        except Exception as e:
+            logger.warning("⚠️ Telegram bot shutdown error", error=str(e))
         
     except Exception as e:
         logger.error("⚠️ Error during shutdown", error=str(e))
@@ -398,8 +411,22 @@ async def rate_limiting_middleware(request: Request, call_next):
     from app.core.rate_limit import check_rate_limit, RateLimitExceeded
     
     try:
-        # Skip rate limiting for health checks and metrics
-        if request.url.path in ["/health", "/metrics"]:
+        # Skip rate limiting for health checks, docs, static, and Telegram webhook
+        path = request.url.path
+        excluded = {
+            "/health",
+            "/metrics",
+            "/docs",
+            "/redoc",
+            "/openapi.json",
+            f"{settings.API_V1_PREFIX}/openapi.json",
+        }
+        if (
+            path in excluded
+            or path.startswith("/static")
+            or path.startswith("/uploads")
+            or path.startswith("/telegram/webhook")
+        ):
             return await call_next(request)
         
         # Get client identifier
@@ -413,14 +440,22 @@ async def rate_limiting_middleware(request: Request, call_next):
                 pass  # Fall back to IP-based limiting
         
         # Check rate limit
-        await check_rate_limit(client_id, request.url.path)
+        await check_rate_limit(client_id, path)
         
         return await call_next(request)
         
     except RateLimitExceeded as e:
-        raise HTTPException(
+        # Return structured 429 response without triggering 500 error handler logs
+        return JSONResponse(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail=f"Rate limit exceeded. Try again in {e.retry_after} seconds.",
+            content={
+                "error": True,
+                "error_code": "RATE_LIMIT_EXCEEDED",
+                "message": f"Rate limit exceeded. Try again in {e.retry_after} seconds.",
+                "retry_after": e.retry_after,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "request_id": getattr(request.state, "request_id", None),
+            },
             headers={"Retry-After": str(e.retry_after)}
         )
 
