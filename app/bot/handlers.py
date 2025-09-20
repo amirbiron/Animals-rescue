@@ -2754,7 +2754,8 @@ async def handle_admin_add_org_name_input(update: Update, context: ContextTypes.
     # Show type options
     keyboard = []
     for t in [OrganizationType.VET_CLINIC, OrganizationType.EMERGENCY_VET, OrganizationType.ANIMAL_HOSPITAL, OrganizationType.ANIMAL_SHELTER, OrganizationType.RESCUE_ORG, OrganizationType.GOVERNMENT, OrganizationType.VOLUNTEER_GROUP]:
-        keyboard.append([InlineKeyboardButton(t.value, callback_data=f"admin_add_org_type_{t.value}")])
+        label = get_text(f"org_type_{t.value}", lang)
+        keyboard.append([InlineKeyboardButton(label, callback_data=f"admin_add_org_type_{t.value}")])
     await update.message.reply_text(get_text("select_org_type", lang), reply_markup=InlineKeyboardMarkup(keyboard))
 
 
@@ -3454,7 +3455,10 @@ def create_bot_application() -> Application:
     application.add_handler(CallbackQueryHandler(handle_admin_assign_org, pattern="admin_assign_org_.*"))
     application.add_handler(CallbackQueryHandler(handle_admin_pending_orgs, pattern="admin_pending_orgs"))
     application.add_handler(CallbackQueryHandler(handle_admin_active_orgs, pattern="admin_active_orgs"))
-    application.add_handler(CallbackQueryHandler(handle_admin_add_org, pattern="admin_add_org"))
+    application.add_handler(CallbackQueryHandler(handle_admin_view_org, pattern="^admin_view_org_.*$"))
+    # Add org flow callbacks
+    application.add_handler(CallbackQueryHandler(handle_admin_add_org, pattern="^admin_add_org$"))
+    application.add_handler(CallbackQueryHandler(handle_admin_add_org_type, pattern="^admin_add_org_type_.*$"))
     application.add_handler(CallbackQueryHandler(handle_admin_add_org_type, pattern="admin_add_org_type_.*"))
     application.add_handler(CallbackQueryHandler(handle_admin_import_google, pattern="admin_import_google"))
     application.add_handler(CallbackQueryHandler(handle_admin_import_location, pattern="admin_import_location"))
@@ -3484,7 +3488,7 @@ def create_bot_application() -> Application:
     application.add_handler(MessageHandler(
         filters.TEXT & ~filters.COMMAND,
         handle_admin_add_org_name_input
-    ))
+    ), block=False)
     # Handle text inputs for quiet hours and contact details
     application.add_handler(MessageHandler(
         filters.TEXT & ~filters.COMMAND,
