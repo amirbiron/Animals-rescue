@@ -19,6 +19,7 @@ from app.bot.handlers import (
     show_admin_orgs_menu,
 )
 from telegram.ext import ConversationHandler
+from telegram import ReplyKeyboardRemove
 
 
 class MsgStub:
@@ -392,6 +393,9 @@ async def test_import_location_success_flow():
             assert "awaiting_import_location" not in ctx.user_data
             assert "import_radius_m" not in ctx.user_data
             assert msg_loc.calls  # completion reply
+            # Ensure keyboard is removed
+            rm = msg_loc.calls[-1][1].get("reply_markup")
+            assert isinstance(rm, ReplyKeyboardRemove)
 
 
 @pytest.mark.asyncio
