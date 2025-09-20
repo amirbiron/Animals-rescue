@@ -19,7 +19,7 @@ from app.bot.handlers import (
     show_admin_orgs_menu,
 )
 from telegram.ext import ConversationHandler
-from telegram import ReplyKeyboardRemove
+from telegram import ReplyKeyboardRemove, ReplyKeyboardMarkup
 
 
 class MsgStub:
@@ -88,7 +88,10 @@ async def test_import_google_city_failure_ends_conversation():
             res = await handle_admin_import_google_input(update, ctx)
             assert res == ConversationHandler.END
             assert "awaiting_google_city" not in ctx.user_data
-            assert update.message.calls  # replied with error
+            # Two replies: progress then error
+            assert len(update.message.calls) >= 2
+            assert "מבצע ייבוא" in update.message.calls[0][0][0]
+            assert "שגיאה בייבוא" in update.message.calls[-1][0][0]
 
 
 @pytest.mark.asyncio
@@ -392,7 +395,8 @@ async def test_import_location_success_flow():
         longitude = 34.87
     msg_loc = MsgStub(location=_Loc())
     with patch("app.services.google.GoogleService", return_value=_DummyGoogle()):
-        with patch("app.bot.handlers.async_session_maker", return_value=_FakeSession()):
+        session = _FakeSession()
+        with patch("app.bot.handlers.async_session_maker", return_value=session):
             end = await handle_admin_import_location_inputs(types.SimpleNamespace(message=msg_loc, effective_user=None, effective_chat=None), ctx)
             assert end == ConversationHandler.END
             assert "awaiting_import_location" not in ctx.user_data
@@ -401,6 +405,8 @@ async def test_import_location_success_flow():
             # Ensure keyboard is removed
             rm = msg_loc.calls[-1][1].get("reply_markup")
             assert isinstance(rm, ReplyKeyboardRemove)
+            # Dedup ensured only one add
+            assert session.added == 1
 
 
 @pytest.mark.asyncio
@@ -448,6 +454,43 @@ async def test_import_google_city_dedup():
             assert end == ConversationHandler.END
             assert msg.calls  # completion reply
             assert session.added == 1  # only first place added, duplicate skipped
+
+
+@pytest.mark.asyncio
+async def test_admin_add_org_type_sends_email_instructions_i18n():
+    ctx = make_context()
+    ctx.user_data["add_org"] = {"step": "type", "name": "Org Z"}
+    cq = CqStub(data="admin_add_org_type_animal_shelter")
+    update = types.SimpleNamespace(callback_query=cq, effective_user=None, effective_chat=None)
+    res = await handle_admin_add_org_type(update, ctx)
+    assert res == ADMIN_ADD_ORG_EMAIL
+    # Message edited with email instructions
+    assert cq.edited
+    assert "הכנס כתובת אימייל" in cq.edited[-1][0][0]
+
+
+@pytest.mark.asyncio
+async def test_import_location_start_shows_keyboard():
+    ctx = make_context()
+    cq = CqStub(data="admin_import_location")
+    update = types.SimpleNamespace(callback_query=cq, effective_user=None, effective_chat=None)
+    res = await handle_admin_import_location(update, ctx)
+    assert res == ADMIN_IMPORT_LOCATION_INPUT
+    # The prompt and keyboard appear
+    assert cq.message.calls
+    km = cq.message.calls[-1][1].get("reply_markup")
+    assert isinstance(km, ReplyKeyboardMarkup)
+
+
+@pytest.mark.asyncio
+async def test_import_google_start_prompts_city():
+    ctx = make_context()
+    cq = CqStub(data="admin_import_google")
+    update = types.SimpleNamespace(callback_query=cq, effective_user=None, effective_chat=None)
+    res = await handle_admin_import_google(update, ctx)
+    assert res == ADMIN_IMPORT_GOOGLE_CITY
+    assert cq.edited
+    assert "הכנס שם עיר" in cq.edited[-1][0][0]
 
 
 @pytest.mark.asyncio
