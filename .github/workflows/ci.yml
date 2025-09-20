@@ -40,6 +40,25 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Init database schema
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/test_db
+          ENVIRONMENT: testing
+          TESTING: '1'
+          TELEGRAM_BOT_TOKEN: 'test-token'
+          PYTHONPATH: ${{ github.workspace }}
+        run: |
+          python - <<'PY'
+          import asyncio
+          import os
+          os.environ.setdefault('ENVIRONMENT','testing')
+          os.environ.setdefault('TESTING','1')
+          os.environ.setdefault('DATABASE_URL','postgresql+asyncpg://postgres:postgres@localhost:5432/test_db')
+          from app.models.database import create_tables
+          asyncio.run(create_tables())
+          print('DB schema initialized')
+          PY
+
       - name: Smoke import (no side effects)
         env:
           ENVIRONMENT: testing
@@ -53,6 +72,7 @@ jobs:
           os.environ.setdefault('ENVIRONMENT','testing')
           os.environ.setdefault('TESTING','1')
           os.environ.setdefault('TELEGRAM_BOT_TOKEN','test-token')
+          os.environ.setdefault('DATABASE_URL','postgresql+asyncpg://postgres:postgres@localhost:5432/test_db')
           importlib.import_module('app.main')
           print('Imported app.main OK')
           PY
@@ -65,5 +85,6 @@ jobs:
           PYTHONPATH: ${{ github.workspace }}
         run: |
           export PYTHONPATH="$PWD"
+          export DATABASE_URL="postgresql+asyncpg://postgres:postgres@localhost:5432/test_db"
           pytest -q
 
