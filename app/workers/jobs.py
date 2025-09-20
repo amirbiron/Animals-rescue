@@ -34,6 +34,7 @@ from app.services.google import GoogleService
 from app.services.nlp import NLPService
 from app.services.email import EmailService
 from app.services.telegram_alerts import TelegramAlertsService
+from app.services.whatsapp import get_whatsapp_service
 from app.services.sms import get_sms_service
 from app.core.i18n import get_text
 
@@ -582,6 +583,18 @@ async def _send_organization_alert_async(
                     }
                 except Exception as e:
                     result = {"status": "failed", "error": str(e)}
+            elif channel == "whatsapp":
+                try:
+                    wa_service = get_whatsapp_service()
+                    wa_text = message_data["message"]
+                    wa_res = await wa_service.send(recipient, wa_text)
+                    result = {
+                        "status": wa_res.status,
+                        "external_id": wa_res.external_id,
+                        "error": wa_res.error,
+                    }
+                except Exception as e:
+                    result = {"status": "failed", "error": str(e)}
             
             if result and result.get("status") == "success":
                 alert.status = AlertStatus.SENT
@@ -590,8 +603,27 @@ async def _send_organization_alert_async(
             else:
                 alert.status = AlertStatus.FAILED
                 alert.last_error = result.get("error", "Unknown error")
-                
-                # Schedule retry if attempts remain
+
+                # Escalation: try next channel in org.alert_channels
+                try:
+                    channels = list(organization.alert_channels or [])
+                    if channel in channels:
+                        current_index = channels.index(channel)
+                        if current_index + 1 < len(channels):
+                            next_channel = channels[current_index + 1]
+                            # Queue next channel immediately
+                            if settings.ENABLE_WORKERS:
+                                send_organization_alert.delay(
+                                    str(report.id), str(organization.id), next_channel
+                                )
+                            else:
+                                asyncio.create_task(_send_organization_alert_async(
+                                    str(report.id), str(organization.id), next_channel
+                                ))
+                except Exception as _e:
+                    logger.warning("Escalation scheduling failed", error=str(_e))
+
+                # Also schedule retry if attempts remain
                 if alert.attempts < alert.max_attempts:
                     retry_delay = min(alert.attempts * 60, 300)  # Max 5 min delay
                     alert.retry_at = datetime.now(timezone.utc) + timedelta(seconds=retry_delay)
@@ -667,8 +699,29 @@ async def _generate_alert_message(
     template_name = f"alert_{channel}_{lang}.j2"
     try:
         template = template_env.get_template(template_name)
-    except:
-        # Fallback to Hebrew template
+    except Exception:
+        # Fallbacks for text-only channels (sms/whatsapp) when specific template missing
+        if channel in {"sms", "whatsapp"}:
+            # Minimal text rendering without template
+            # Compose a compact, RTL-friendly line
+            urgency_icon = {
+                UrgencyLevel.CRITICAL: "🚨",
+                UrgencyLevel.HIGH: "🔴",
+                UrgencyLevel.MEDIUM: "🟡",
+                UrgencyLevel.LOW: "🟢",
+            }.get(report.urgency_level, "📢")
+            city = report.city or ""
+            parts = [
+                f"{urgency_icon} {get_text('alert.new_report.body', lang)}",
+                f"#{report.public_id}",
+            ]
+            if city:
+                parts.append(f"{get_text('report.location', lang)}: {city}")
+            if report.latitude and report.longitude:
+                parts.append(f"https://maps.google.com/?q={report.latitude},{report.longitude}")
+            text_message = " | ".join(parts)
+            return {"message": text_message, "subject": None, "template": "inline_text"}
+        # Else fallback to Hebrew template
         template_name = f"alert_{channel}_he.j2"
         template = template_env.get_template(template_name)
     
