@@ -412,8 +412,102 @@ async def test_import_google_city_dedup():
             return None
 
     with patch("app.services.google.GoogleService", return_value=_DummyGoogle()):
-        with patch("app.bot.handlers.async_session_maker", return_value=_FakeSession()):
+        session = _FakeSession()
+        with patch("app.bot.handlers.async_session_maker", return_value=session):
             msg = MsgStub(text="רעננה")
             end = await handle_admin_import_google_input(types.SimpleNamespace(message=msg, effective_user=None, effective_chat=None), ctx)
             assert end == ConversationHandler.END
             assert msg.calls  # completion reply
+            assert session.added == 1  # only first place added, duplicate skipped
+
+
+@pytest.mark.asyncio
+async def test_add_org_empty_name_stays_in_state():
+    ctx = make_context()
+    ctx.user_data["add_org"] = {"step": "name"}
+    msg = MsgStub(text="   ")
+    res = await handle_admin_add_org_name_input(types.SimpleNamespace(message=msg, effective_user=None, effective_chat=None), ctx)
+    assert res == ADMIN_ADD_ORG_NAME
+    assert msg.calls  # invalid input reply
+
+
+@pytest.mark.asyncio
+async def test_add_org_email_creates_object_with_fields():
+    ctx = make_context()
+    ctx.user_data["add_org"] = {"step": "email", "name": "Org Y", "org_type": "animal_shelter"}
+
+    class _FakeSession:
+        def __init__(self):
+            self.added = []
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+        def add(self, obj):
+            self.added.append(obj)
+        async def commit(self):
+            return None
+
+    session = _FakeSession()
+    with patch("app.bot.handlers.async_session_maker", return_value=session):
+        msg = MsgStub(text="orgy@example.com")
+        end = await handle_admin_add_org_email_input(types.SimpleNamespace(message=msg, effective_user=None, effective_chat=None), ctx)
+        assert end == ConversationHandler.END
+        assert session.added and session.added[0].name == "Org Y"
+        assert session.added[0].email == "orgy@example.com"
+
+
+@pytest.mark.asyncio
+async def test_import_location_default_radius_used():
+    ctx = make_context()
+    # Start via callback and do not set radius
+    _ = await handle_admin_import_location(types.SimpleNamespace(callback_query=CqStub(data="admin_import_location"), effective_user=None, effective_chat=None), ctx)
+
+    class _DummyGoogle:
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+        async def search_veterinary_nearby(self, loc, radius: int):
+            assert radius == 10000
+            return []
+        async def search_shelters_nearby(self, loc, radius: int):
+            assert radius == 10000
+            return []
+
+    class _FakeSession:
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+        async def execute(self, *a, **k):
+            class _R:
+                def scalar_one_or_none(self_inner):
+                    return None
+            return _R()
+        def add(self, *a, **k):
+            return None
+        async def commit(self):
+            return None
+
+    class _Loc:
+        latitude = 31.0
+        longitude = 34.0
+    msg_loc = MsgStub(location=_Loc())
+    with patch("app.services.google.GoogleService", return_value=_DummyGoogle()):
+        with patch("app.bot.handlers.async_session_maker", return_value=_FakeSession()):
+            end = await handle_admin_import_location_inputs(types.SimpleNamespace(message=msg_loc, effective_user=None, effective_chat=None), ctx)
+            assert end == ConversationHandler.END
+            # Verify message mentions 10km
+            last_text = msg_loc.calls[-1][0][0]
+            assert "10" in last_text
+
+
+@pytest.mark.asyncio
+async def test_import_location_radius_20_selection():
+    ctx = make_context()
+    _ = await handle_admin_import_location(types.SimpleNamespace(callback_query=CqStub(data="admin_import_location"), effective_user=None, effective_chat=None), ctx)
+    msg_r = MsgStub(text="רדיוס 20 ק""מ")
+    res = await handle_admin_import_location_inputs(types.SimpleNamespace(message=msg_r, effective_user=None, effective_chat=None), ctx)
+    assert res == ADMIN_IMPORT_LOCATION_INPUT
+    assert ctx.user_data.get("import_radius_m") == 20000
