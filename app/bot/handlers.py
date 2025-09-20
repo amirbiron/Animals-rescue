@@ -2595,6 +2595,9 @@ async def handle_admin_import_location_inputs(update: Update, context: ContextTy
         )
         return ConversationHandler.END
 
+    # If we got here, input wasn't a known radius or a location – keep waiting in the same state
+    return ADMIN_IMPORT_LOCATION_INPUT
+
 
 async def handle_admin_import_google_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     # Guard: only act when awaiting city input
