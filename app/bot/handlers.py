@@ -63,6 +63,19 @@ from app.core.i18n import get_text, detect_language, set_user_language, get_user
     SELECTING_ANIMAL_TYPE,
 ) = range(6)
 
+# Admin: Add Organization conversation states (use distinct values to avoid collisions)
+(
+    ADMIN_ADD_ORG_NAME,
+    ADMIN_ADD_ORG_TYPE,
+    ADMIN_ADD_ORG_EMAIL,
+) = range(100, 103)
+
+# Admin: Import flows conversation states
+(
+    ADMIN_IMPORT_GOOGLE_CITY,
+    ADMIN_IMPORT_LOCATION_INPUT,
+) = range(103, 105)
+
 # User session data keys
 USER_DATA_KEYS = {
     "report_draft": "current_report",
@@ -2475,16 +2488,18 @@ async def handle_admin_active_orgs(update: Update, context: ContextTypes.DEFAULT
     await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
 
 
-async def handle_admin_import_google(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def handle_admin_import_google(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     await query.answer()
     lang = get_user_language(context)
     logger.info("enter_handle_admin_import_google", user_id=getattr(update.effective_user, "id", None), chat_id=getattr(update.effective_chat, "id", None))
     context.user_data["awaiting_google_city"] = True
     await query.edit_message_text("הכנס שם עיר לייבוא קליניקות ומקלטים (באנגלית/עברית)")
+    logger.info("enter state=google_city", flow="admin_import_google")
+    return ADMIN_IMPORT_GOOGLE_CITY
 
 
-async def handle_admin_import_location(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def handle_admin_import_location(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     await query.answer()
     lang = get_user_language(context)
@@ -2497,9 +2512,11 @@ async def handle_admin_import_location(update: Update, context: ContextTypes.DEF
     ]
     await query.edit_message_text("שלח מיקום GPS ובחר רדיוס (5/10/20/50 ק""מ)")
     await query.message.reply_text("בחר רדיוס:", reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True))
+    logger.info("enter state=import_location", flow="admin_import_location")
+    return ADMIN_IMPORT_LOCATION_INPUT
 
 
-async def handle_admin_import_location_inputs(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def handle_admin_import_location_inputs(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Collect location and radius, then import nearby orgs."""
     logger.info(
         "enter_handle_admin_import_location_inputs",
@@ -2510,7 +2527,7 @@ async def handle_admin_import_location_inputs(update: Update, context: ContextTy
         chat_id=getattr(update.effective_chat, "id", None),
     )
     if not context.user_data.get("awaiting_import_location"):
-        return
+        return ADMIN_IMPORT_LOCATION_INPUT
     lang = get_user_language(context)
     # Determine radius selection
     text = (getattr(update, 'message', None) and update.message.text or '')
@@ -2524,7 +2541,7 @@ async def handle_admin_import_location_inputs(update: Update, context: ContextTy
         context.user_data["import_radius_m"] = radius_map[text]
         logger.info("import_location_radius_selected", radius_m=radius_map[text])
         await update.message.reply_text("עכשיו שלח את המיקום שלך (כפתור 'שתף מיקום')")
-        return
+        return ADMIN_IMPORT_LOCATION_INPUT
     if getattr(update, 'message', None) and update.message.location:
         loc = update.message.location
         radius = int(context.user_data.get("import_radius_m", 10000))
@@ -2539,7 +2556,12 @@ async def handle_admin_import_location_inputs(update: Update, context: ContextTy
             logger.info("import_location_google_results", clinics=len(clinics or []), shelters=len(shelters or []))
             async with async_session_maker() as session:
                 from sqlalchemy import select
+                seen_place_ids = set()
                 for place in places:
+                    place_id = place.get("place_id")
+                    if not place_id or place_id in seen_place_ids:
+                        continue
+                    seen_place_ids.add(place_id)
                     exists = await session.execute(select(Organization).where(Organization.google_place_id == place["place_id"]))
                     if exists.scalar_one_or_none():
                         continue
@@ -2568,7 +2590,7 @@ async def handle_admin_import_location_inputs(update: Update, context: ContextTy
             await update.message.reply_text(f"שגיאה בייבוא: {e}")
             context.user_data.pop("awaiting_import_location", None)
             context.user_data.pop("import_radius_m", None)
-            return
+            return ConversationHandler.END
         context.user_data.pop("awaiting_import_location", None)
         context.user_data.pop("import_radius_m", None)
         logger.info("import_location_completed", created=created, radius_m=radius)
@@ -2576,9 +2598,13 @@ async def handle_admin_import_location_inputs(update: Update, context: ContextTy
             f"ייבוא לפי מיקום הושלם. נוספו {created} ארגונים חדשים ברדיוס {int(radius/1000)} ק""מ.",
             reply_markup=ReplyKeyboardRemove()
         )
+        return ConversationHandler.END
+
+    # If we got here, input wasn't a known radius or a location – keep waiting in the same state
+    return ADMIN_IMPORT_LOCATION_INPUT
 
 
-async def handle_admin_import_google_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def handle_admin_import_google_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     # Guard: only act when awaiting city input
     logger.info(
         "enter_handle_admin_import_google_input",
@@ -2588,12 +2614,12 @@ async def handle_admin_import_google_input(update: Update, context: ContextTypes
         chat_id=getattr(update.effective_chat, "id", None),
     )
     if not context.user_data.get("awaiting_google_city"):
-        return
+        return ADMIN_IMPORT_GOOGLE_CITY
     lang = get_user_language(context)
     city = (getattr(update, 'message', None) and update.message.text or '').strip()
     if not city:
         await update.message.reply_text(get_text("invalid_input", lang))
-        return
+        return ADMIN_IMPORT_GOOGLE_CITY
 
     # Per-user concurrency lock to avoid parallel imports and race conditions
     user = update.effective_user
@@ -2601,7 +2627,7 @@ async def handle_admin_import_google_input(update: Update, context: ContextTypes
     async with lock:
         # Re-check flag after acquiring the lock in case another import already handled it
         if not context.user_data.get("awaiting_google_city"):
-            return
+            return ConversationHandler.END
 
         # Immediate feedback that import has started
         try:
@@ -2620,7 +2646,15 @@ async def handle_admin_import_google_input(update: Update, context: ContextTypes
             logger.info("import_google_city_results", city=city, clinics=len(clinics or []), shelters=len(shelters or []))
             async with async_session_maker() as session:
                 from sqlalchemy import select
+                # Deduplicate by place_id (in-memory) to avoid double inserts when lists overlap
+                seen_place_ids = set()
                 for place in places:
+                    place_id = place.get("place_id")
+                    if not place_id:
+                        continue
+                    if place_id in seen_place_ids:
+                        continue
+                    seen_place_ids.add(place_id)
                     exists = await session.execute(select(Organization).where(Organization.google_place_id == place["place_id"]))
                     if exists.scalar_one_or_none():
                         continue
@@ -2648,12 +2682,13 @@ async def handle_admin_import_google_input(update: Update, context: ContextTypes
             logger.error("import_google_city_failed", city=city, error=str(e))
             await update.message.reply_text(f"שגיאה בייבוא: {e}")
             context.user_data.pop("awaiting_google_city", None)
-            return
+            return ConversationHandler.END
 
         # Clear flag and report result
         context.user_data.pop("awaiting_google_city", None)
         logger.info("import_google_city_completed", city=city, created=created)
         await update.message.reply_text(f"ייבוא מגוגל הושלם. נוספו {created} ארגונים חדשים בעיר {city}.")
+        return ConversationHandler.END
 
 
 # =============================================================================
@@ -2858,16 +2893,18 @@ async def handle_admin_geocode_orgs(update: Update, context: ContextTypes.DEFAUL
     await query.edit_message_text("הפעולה תוסף בקרוב: העשרת כתובות ארגונים בנתוני מיקום.")
 
 
-async def handle_admin_add_org(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def handle_admin_add_org(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     await query.answer()
     lang = get_user_language(context)
     logger.info("enter_handle_admin_add_org", user_id=getattr(update.effective_user, "id", None), chat_id=getattr(update.effective_chat, "id", None))
     context.user_data["add_org"] = {"step": "name"}
     await query.edit_message_text(get_text("add_organization", lang) + "\n\n" + get_text("prompt_org_name", lang))
+    logger.info("enter state=name", flow="admin_add_org")
+    return ADMIN_ADD_ORG_NAME
 
 
-async def handle_admin_add_org_name_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def handle_admin_add_org_name_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     logger.info(
         "enter_handle_admin_add_org_name_input",
         in_flow=bool(context.user_data.get("add_org")),
@@ -2876,13 +2913,14 @@ async def handle_admin_add_org_name_input(update: Update, context: ContextTypes.
         user_id=getattr(update.effective_user, "id", None),
         chat_id=getattr(update.effective_chat, "id", None),
     )
+    logger.info("enter state=name", flow="admin_add_org")
     if not context.user_data.get("add_org") or context.user_data.get("add_org", {}).get("step") != "name":
-        return
+        return ADMIN_ADD_ORG_NAME
     lang = get_user_language(context)
     name = (getattr(update, 'message', None) and update.message.text or '').strip()
     if not name:
         await update.message.reply_text(get_text("invalid_input", lang))
-        return
+        return ADMIN_ADD_ORG_NAME
     logger.info("add_org_name_captured", name=name)
     context.user_data["add_org"] = {"step": "type", "name": name}
     # Show type options
@@ -2891,9 +2929,11 @@ async def handle_admin_add_org_name_input(update: Update, context: ContextTypes.
         label = get_text(f"org_type_{t.value}", lang)
         keyboard.append([InlineKeyboardButton(label, callback_data=f"admin_add_org_type_{t.value}")])
     await update.message.reply_text(get_text("select_org_type", lang), reply_markup=InlineKeyboardMarkup(keyboard))
+    logger.info("enter state=type", flow="admin_add_org")
+    return ADMIN_ADD_ORG_TYPE
 
 
-async def handle_admin_add_org_email_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def handle_admin_add_org_email_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Collect organization email and create the organization."""
     logger.info(
         "enter_handle_admin_add_org_email_input",
@@ -2903,14 +2943,15 @@ async def handle_admin_add_org_email_input(update: Update, context: ContextTypes
         user_id=getattr(update.effective_user, "id", None),
         chat_id=getattr(update.effective_chat, "id", None),
     )
+    logger.info("enter state=email", flow="admin_add_org")
     if not context.user_data.get("add_org") or context.user_data.get("add_org", {}).get("step") != "email":
-        return
+        return ADMIN_ADD_ORG_EMAIL
     lang = get_user_language(context)
     text = (getattr(update, 'message', None) and update.message.text or '').strip()
     import re as _re
     if not _re.match(r"^[^\s@]+@[^\s@]+\.[^\s@]+$", text):
         await update.message.reply_text(get_text("invalid_email", lang))
-        return
+        return ADMIN_ADD_ORG_EMAIL
     logger.info("add_org_email_captured")
     add_ctx = context.user_data.get("add_org", {})
     name = add_ctx.get("name")
@@ -2928,9 +2969,10 @@ async def handle_admin_add_org_email_input(update: Update, context: ContextTypes
         await session.commit()
     context.user_data.pop("add_org", None)
     await update.message.reply_text(get_text("org_approved", lang).format(name=name))
+    return ConversationHandler.END
 
 
-async def handle_admin_add_org_type(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def handle_admin_add_org_type(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     logger.info(
         "enter_handle_admin_add_org_type",
         in_flow=bool(context.user_data.get("add_org")),
@@ -2938,8 +2980,9 @@ async def handle_admin_add_org_type(update: Update, context: ContextTypes.DEFAUL
         user_id=getattr(update.effective_user, "id", None),
         chat_id=getattr(update.effective_chat, "id", None),
     )
+    logger.info("enter state=type", flow="admin_add_org")
     if not context.user_data.get("add_org") or context.user_data.get("add_org", {}).get("step") != "type":
-        return
+        return ADMIN_ADD_ORG_TYPE
     query = update.callback_query
     await query.answer()
     lang = get_user_language(context)
@@ -2948,10 +2991,12 @@ async def handle_admin_add_org_type(update: Update, context: ContextTypes.DEFAUL
     name = context.user_data.get("add_org", {}).get("name")
     if not name:
         await query.edit_message_text(get_text("operation_failed", lang))
-        return
+        return ADMIN_ADD_ORG_TYPE
     # Move to email collection step before creation
     context.user_data["add_org"] = {"step": "email", "name": name, "org_type": org_type}
     await query.edit_message_text(get_text("email_instructions", lang))
+    logger.info("enter state=email", flow="admin_add_org")
+    return ADMIN_ADD_ORG_EMAIL
 
 
 async def handle_admin_org_performance(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -3357,6 +3402,8 @@ async def handle_language_selection(update: Update, context: ContextTypes.DEFAUL
     db_user = await get_or_create_user(update.effective_user)
     await set_user_language(db_user.id, lang_code)
     context.user_data[USER_DATA_KEYS["language"]] = lang_code
+    # Also store under plain key for compatibility with tests/consumers
+    context.user_data["language"] = lang_code
 
     lang_names = {"he": "עברית", "en": "English", "ar": "العربية"}
     ack = get_text("language_changed", lang_code).format(language=lang_names.get(lang_code, lang_code))
@@ -3378,8 +3425,16 @@ async def handle_language_selection(update: Update, context: ContextTypes.DEFAUL
         ],
     ]
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=False)
+    # Build a friendly name with fallbacks if first_name is missing
+    _eu = update.effective_user
+    _name = (
+        getattr(_eu, "first_name", None)
+        or getattr(_eu, "full_name", None)
+        or getattr(_eu, "username", None)
+        or "משתמש"
+    )
     welcome = get_text("welcome_message", lang_code).format(
-        name=update.effective_user.first_name or "משתמש",
+        name=_name,
         app_name=settings.APP_NAME,
     )
     await query.message.reply_text(welcome, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
@@ -3497,6 +3552,60 @@ def create_bot_application() -> Application:
     # Add conversation handler for report creation
     report_handler = create_report_conversation_handler()
     application.add_handler(report_handler)
+
+    # Admin: Add Organization conversation handler
+    admin_add_org_conv = ConversationHandler(
+        entry_points=[
+            CallbackQueryHandler(handle_admin_add_org, pattern="^admin_add_org$")
+        ],
+        states={
+            ADMIN_ADD_ORG_NAME: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_admin_add_org_name_input),
+            ],
+            ADMIN_ADD_ORG_TYPE: [
+                CallbackQueryHandler(handle_admin_add_org_type, pattern="^admin_add_org_type_.*$")
+            ],
+            ADMIN_ADD_ORG_EMAIL: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_admin_add_org_email_input),
+            ],
+        },
+        fallbacks=[],
+        allow_reentry=True,
+        name="admin_add_org_conv",
+    )
+    application.add_handler(admin_add_org_conv)
+
+    # Admin: Import Google by city conversation handler
+    admin_import_google_conv = ConversationHandler(
+        entry_points=[
+            CallbackQueryHandler(handle_admin_import_google, pattern="admin_import_google")
+        ],
+        states={
+            ADMIN_IMPORT_GOOGLE_CITY: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_admin_import_google_input),
+            ]
+        },
+        fallbacks=[],
+        allow_reentry=True,
+        name="admin_import_google_conv",
+    )
+    application.add_handler(admin_import_google_conv)
+
+    # Admin: Import by location conversation handler
+    admin_import_location_conv = ConversationHandler(
+        entry_points=[
+            CallbackQueryHandler(handle_admin_import_location, pattern="admin_import_location")
+        ],
+        states={
+            ADMIN_IMPORT_LOCATION_INPUT: [
+                MessageHandler((filters.TEXT | filters.LOCATION) & ~filters.COMMAND, handle_admin_import_location_inputs)
+            ]
+        },
+        fallbacks=[],
+        allow_reentry=True,
+        name="admin_import_location_conv",
+    )
+    application.add_handler(admin_import_location_conv)
     
     # Add callback handlers for various actions
     application.add_handler(CallbackQueryHandler(
@@ -3632,11 +3741,7 @@ def create_bot_application() -> Application:
     application.add_handler(CallbackQueryHandler(handle_admin_active_orgs, pattern="admin_active_orgs"))
     application.add_handler(CallbackQueryHandler(handle_admin_view_org, pattern="^admin_view_org_.*$"))
     # Add org flow callbacks
-    application.add_handler(CallbackQueryHandler(handle_admin_add_org, pattern="^admin_add_org$"))
-    application.add_handler(CallbackQueryHandler(handle_admin_add_org_type, pattern="^admin_add_org_type_.*$"))
-    application.add_handler(CallbackQueryHandler(handle_admin_add_org_type, pattern="admin_add_org_type_.*"))
-    application.add_handler(CallbackQueryHandler(handle_admin_import_google, pattern="admin_import_google"))
-    application.add_handler(CallbackQueryHandler(handle_admin_import_location, pattern="admin_import_location"))
+    # Note: moved add_org/import flows under ConversationHandlers below to avoid duplicate handling
     application.add_handler(CallbackQueryHandler(handle_admin_manage_import_cities, pattern="admin_import_cities"))
     application.add_handler(CallbackQueryHandler(handle_admin_import_cities_add, pattern="admin_import_cities_add"))
     application.add_handler(CallbackQueryHandler(handle_admin_import_cities_remove, pattern="admin_import_cities_remove"))
@@ -3660,12 +3765,7 @@ def create_bot_application() -> Application:
         handle_service_area_location,
         block=False
     ))
-    # Admin add organization: capture name input early before generic text handlers
-    application.add_handler(MessageHandler(
-        filters.TEXT & ~filters.COMMAND,
-        handle_admin_add_org_name_input,
-        block=False
-    ))
+    # Note: name/email inputs for add_org handled by ConversationHandler states – avoid duplicate catch-all
     # Handle text inputs for quiet hours and contact details
     application.add_handler(MessageHandler(
         filters.TEXT & ~filters.COMMAND,
@@ -3693,22 +3793,7 @@ def create_bot_application() -> Application:
         handle_admin_broadcast_input,
         block=False
     ))
-    application.add_handler(MessageHandler(
-        filters.TEXT & ~filters.COMMAND,
-        handle_admin_import_google_input,
-        block=False
-    ))
-    # Admin add organization email input
-    application.add_handler(MessageHandler(
-        filters.TEXT & ~filters.COMMAND,
-        handle_admin_add_org_email_input,
-        block=False
-    ))
-    application.add_handler(MessageHandler(
-        (filters.TEXT | filters.LOCATION) & ~filters.COMMAND,
-        handle_admin_import_location_inputs,
-        block=False
-    ))
+    # Note: import google/location inputs handled by ConversationHandler states – avoid duplicate catch-all
     application.add_handler(MessageHandler(
         filters.TEXT & ~filters.COMMAND,
         handle_admin_import_cities_inputs,

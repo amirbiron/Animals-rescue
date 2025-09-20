@@ -95,20 +95,30 @@ async def telegram_webhook(request: Request) -> Response:
                 detail="Invalid update format"
             )
         
-        # Log update info
-        update_info = {}
+        # Log update info – extended to cover all types
+        update_info = {"has_message": bool(update.message), "has_callback": bool(update.callback_query)}
         if update.message:
             update_info.update({
                 "message_id": update.message.message_id,
                 "user_id": update.message.from_user.id if update.message.from_user else None,
                 "chat_id": update.message.chat.id,
                 "text_preview": update.message.text[:50] if update.message.text else None,
+                "has_location": bool(getattr(update.message, 'location', None)),
+                "has_photo": bool(getattr(update.message, 'photo', None)),
+                "has_contact": bool(getattr(update.message, 'contact', None)),
+                "has_venue": bool(getattr(update.message, 'venue', None)),
             })
-        elif update.callback_query:
+            if update.message.location:
+                update_info.update({
+                    "latitude": update.message.location.latitude,
+                    "longitude": update.message.location.longitude,
+                })
+        if update.callback_query:
             update_info.update({
                 "callback_query_id": update.callback_query.id,
                 "user_id": update.callback_query.from_user.id,
                 "data": update.callback_query.data,
+                "message_id": update.callback_query.message.message_id if update.callback_query.message else None,
             })
         
         logger.info("Processing Telegram update", update_id=update.update_id, **update_info)
