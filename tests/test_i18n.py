@@ -41,7 +41,15 @@ async def test_show_language_menu_sends_buttons():
 async def test_handle_language_selection_updates_context():
     ctx = make_ctx()
     cq = CqStub("set_lang_en")
-    update = types.SimpleNamespace(callback_query=cq, effective_user=types.SimpleNamespace(id=12345))
+    update = types.SimpleNamespace(
+        callback_query=cq,
+        effective_user=types.SimpleNamespace(
+            id=12345,
+            username="testuser",
+            full_name="Test User",
+            language_code="he",
+        ),
+    )
     # Patch i18n setter if needed
     with patch("app.bot.handlers.set_user_language", new=AsyncMock()) as set_lang:
         await handle_language_selection(update, ctx)
