@@ -2532,6 +2532,208 @@ async def handle_admin_import_google_input(update: Update, context: ContextTypes
     await update.message.reply_text(f"ייבוא מגוגל הושלם. נוספו {created} ארגונים חדשים בעיר {city}.")
 
 
+# =============================================================================
+# Admin: Import Cities Management
+# =============================================================================
+
+# Redis key to store the managed list of cities for batch import
+IMPORT_CITIES_REDIS_KEY = "admin:import_cities"
+
+
+async def handle_admin_manage_import_cities(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show management menu for import cities list."""
+    query = update.callback_query
+    await query.answer()
+    lang = get_user_language(context)
+
+    # Load current cities from Redis
+    try:
+        cities_set = await redis_client.smembers(IMPORT_CITIES_REDIS_KEY)
+        cities = sorted(list(cities_set)) if cities_set else []
+    except Exception:
+        cities = []
+
+    # Build summary text
+    if not cities:
+        text = "אין ערים מוגדרות לייבוא."
+    else:
+        lines = ["ערים מוגדרות לייבוא:" ] + [f"• {c}" for c in cities]
+        text = "\n".join(lines)
+
+    keyboard = [
+        [InlineKeyboardButton("➕ הוסף עיר", callback_data="admin_import_cities_add")],
+        [InlineKeyboardButton("➖ הסר עיר", callback_data="admin_import_cities_remove")],
+        [InlineKeyboardButton("▶️ הפעל ייבוא כעת", callback_data="admin_import_cities_run")],
+    ]
+    await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
+
+
+async def handle_admin_import_cities_add(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Prompt admin to provide city/cities to add to the list."""
+    query = update.callback_query
+    await query.answer()
+    context.user_data["awaiting_import_cities_add"] = True
+    await query.edit_message_text("שלחו שם עיר אחת או כמה ערים מופרדות בפסיק / שורה חדשה.")
+
+
+async def handle_admin_import_cities_remove(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Prompt admin to provide city/cities to remove from the list."""
+    query = update.callback_query
+    await query.answer()
+    context.user_data["awaiting_import_cities_remove"] = True
+
+    # Show current list for convenience
+    try:
+        current = await redis_client.smembers(IMPORT_CITIES_REDIS_KEY)
+        preview = ", ".join(sorted(list(current))) if current else "(אין ערים מוגדרות)"
+    except Exception:
+        preview = "(שגיאה בקריאת הרשימה)"
+    await query.edit_message_text(
+        f"כתבו את שם העיר להסרה (אפשר כמה, בפסיק/שורות).\nנוכחי: {preview}"
+    )
+
+
+async def handle_admin_import_cities_run(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Run batch import for all configured cities using Google service."""
+    query = update.callback_query
+    await query.answer()
+
+    # Load cities
+    try:
+        cities_set = await redis_client.smembers(IMPORT_CITIES_REDIS_KEY)
+        cities = sorted(list(cities_set)) if cities_set else []
+    except Exception as e:
+        await query.edit_message_text(f"שגיאה בטעינת רשימת הערים: {e}")
+        return
+
+    if not cities:
+        await query.edit_message_text("אין ערים להגדרה. הוסיפו ערים תחילה.")
+        return
+
+    from app.services.google import GoogleService
+    from sqlalchemy import select
+
+    google = GoogleService()
+    total_created = 0
+    per_city_summary = []
+
+    try:
+        async with google:
+            async with async_session_maker() as session:
+                for city in cities:
+                    try:
+                        clinics = await google.search_veterinary_clinics(city)
+                        shelters = await google.search_animal_shelters(city)
+                        places = (clinics or []) + (shelters or [])
+                        created_here = 0
+                        for place in places:
+                            try:
+                                exists_q = await session.execute(
+                                    select(Organization).where(Organization.google_place_id == place.get("place_id"))
+                                )
+                                if exists_q.scalar_one_or_none():
+                                    continue
+                                org_type = (
+                                    OrganizationType.ANIMAL_SHELTER
+                                    if any(k in (place.get("name") or "").lower() for k in ["shelter", "rescue", "עמותה", "מקלט"]) else
+                                    OrganizationType.VET_CLINIC
+                                )
+                                org = Organization(
+                                    name=place.get("name"),
+                                    organization_type=org_type,
+                                    primary_phone=place.get("phone"),
+                                    address=place.get("address"),
+                                    city=city,
+                                    latitude=place.get("latitude"),
+                                    longitude=place.get("longitude"),
+                                    google_place_id=place.get("place_id"),
+                                    is_active=True,
+                                    is_verified=False,
+                                )
+                                session.add(org)
+                                created_here += 1
+                            except Exception:
+                                continue
+                        if created_here:
+                            await session.commit()
+                        per_city_summary.append(f"{city}: +{created_here}")
+                        total_created += created_here
+                    except Exception:
+                        per_city_summary.append(f"{city}: שגיאה")
+                        continue
+    except Exception as e:
+        await query.edit_message_text(f"שגיאה במהלך הייבוא: {e}")
+        return
+
+    summary_lines = ["ייבוא הושלם", f"סה\"כ ארגונים שנוספו: {total_created}"] + per_city_summary
+    await query.edit_message_text("\n".join(summary_lines))
+
+
+async def handle_admin_import_cities_inputs(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle admin text inputs for adding/removing import cities."""
+    text = (getattr(update, 'message', None) and update.message.text or '').strip()
+    if not text:
+        return
+
+    # Add cities flow
+    if context.user_data.get("awaiting_import_cities_add"):
+        # Parse cities by comma/newline
+        raw = text.replace("\n", ",")
+        parts = [p.strip() for p in raw.split(",")]
+        cities = [c for c in parts if c]
+        if not cities:
+            await update.message.reply_text("לא נמצאו ערים להוספה.")
+            context.user_data.pop("awaiting_import_cities_add", None)
+            return
+        try:
+            # SADD supports multiple members
+            await redis_client.sadd(IMPORT_CITIES_REDIS_KEY, *cities)
+            current = await redis_client.smembers(IMPORT_CITIES_REDIS_KEY)
+            listing = ", ".join(sorted(list(current))) if current else "(ריק)"
+            await update.message.reply_text(f"נוספו. הרשימה כעת: {listing}")
+        except Exception as e:
+            await update.message.reply_text(f"שגיאה בהוספה: {e}")
+        finally:
+            context.user_data.pop("awaiting_import_cities_add", None)
+        return
+
+    # Remove cities flow
+    if context.user_data.get("awaiting_import_cities_remove"):
+        raw = text.replace("\n", ",")
+        parts = [p.strip() for p in raw.split(",")]
+        cities = [c for c in parts if c]
+        if not cities:
+            await update.message.reply_text("לא נמצאו ערים להסרה.")
+            context.user_data.pop("awaiting_import_cities_remove", None)
+            return
+        try:
+            # Remove each city
+            removed = 0
+            for c in cities:
+                try:
+                    res = await redis_client.srem(IMPORT_CITIES_REDIS_KEY, c)
+                    if res:
+                        removed += int(res)
+                except Exception:
+                    continue
+            current = await redis_client.smembers(IMPORT_CITIES_REDIS_KEY)
+            listing = ", ".join(sorted(list(current))) if current else "(ריק)"
+            await update.message.reply_text(f"הוסרו {removed}. הרשימה כעת: {listing}")
+        except Exception as e:
+            await update.message.reply_text(f"שגיאה בהסרה: {e}")
+        finally:
+            context.user_data.pop("awaiting_import_cities_remove", None)
+        return
+
+
+async def handle_admin_geocode_orgs(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Basic handler to enrich organizations with missing coordinates (stubbed minimal)."""
+    query = update.callback_query
+    await query.answer()
+    # Minimal confirmation to avoid missing handler error; full implementation can be added later
+    await query.edit_message_text("הפעולה תוסף בקרוב: העשרת כתובות ארגונים בנתוני מיקום.")
+
+
 async def handle_admin_add_org(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     await query.answer()
