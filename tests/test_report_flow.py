@@ -103,6 +103,8 @@ async def test_report_flow_confirmation_paths():
             self.data = data
         async def answer(self):
             return None
+        async def edit_message_text(self, *args, **kwargs):
+            return None
     cq = CQ("modify_urgency")
     update = types.SimpleNamespace(callback_query=cq, effective_user=None, effective_chat=None)
     res = await handle_report_confirmation(update, ctx)
