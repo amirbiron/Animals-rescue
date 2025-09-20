@@ -1,0 +1,21 @@
+name,phone,email,address,city,type,is_24_7,website
+מרכז וטרינרי תל אביב,03-5223355,info@vetcenter-tlv.co.il,דרך נמיר 125,תל אביב,emergency_vet,true,https://www.vetcenter.co.il
+אגודת צער בעלי חיים בישראל,03-5136500,info@spca.org.il,הרצל 159,תל אביב,rescue_org,false,https://www.spca.org.il
+תנו לחיות לחיות,03-7441010,office@letlive.org.il,יגאל אלון 157,תל אביב,rescue_org,false,https://www.letlive.org.il
+בית החולים הווטרינרי האוניברסיטאי,08-9489560,vth@mail.huji.ac.il,דרך האוניברסיטה,רחובות,animal_hospital,true,https://www.vth.co.il
+מרפאה וטרינרית עירונית ירושלים,02-6296293,vetjer@jerusalem.muni.il,אגריפס 42,ירושלים,government,false,
+חוות החופש,052-3869915,havatahofesh@gmail.com,כביש 40,באר טוביה,animal_shelter,false,https://www.havatahofesh.org.il
+SOS חיות,03-7477477,help@sos-animals.org.il,המלאכה 3,חולון,rescue_org,false,https://www.sos-animals.org.il
+המרפאה הווטרינרית חיפה,04-8522038,info@haifavet.co.il,שדרות הנשיא 134,חיפה,vet_clinic,false,
+מקלט כלבים עירוני ראשון לציון,03-9547878,dogs@rishonlezion.muni.il,דרך יבנה,ראשון לציון,animal_shelter,false,
+עמותת חבר,09-7467949,info@haver.org.il,התעשייה 8,רעננה,rescue_org,false,https://www.haver.org.il
+וטרינר 24/7 נתניה,09-8855500,emergency@vet247.co.il,הרצל 48,נתניה,emergency_vet,true,
+מרפאת חיות בר - ספארי,03-6423333,wildlife@safari.co.il,ספארי רמת גן,רמת גן,wildlife_center,false,https://www.safari.co.il
+כלביית כפר רות,04-9886674,kfarruth@gmail.com,כפר רות,כפר רות,animal_shelter,false,https://www.kfarruth.org.il
+מרפאה וטרינרית אילת,08-6340454,veteilat@gmail.com,השיטה 5,אילת,vet_clinic,false,
+עמותת אדם טבע ודין,03-5575040,info@adamteva.org.il,כרמל 20,תל אביב,rescue_org,false,https://www.adamteva.org.il
+בית החולים הווטרינרי אסותא,03-7400400,info@assutavet.co.il,יגאל אלון 96,תל אביב,animal_hospital,false,
+מרפאה וטרינרית באר שבע,08-6234567,vetbs@gmail.com,רגר 22,באר שבע,vet_clinic,false,
+החווה של דולי,054-7766554,dollysfarm@gmail.com,מושב בית חנן,בית חנן,animal_shelter,false,
+עמותת כלבלאב,052-3456789,info@doglab.org.il,הרצל 100,הרצליה,rescue_org,false,https://www.doglab.org.il
+וטרינר חירום אשדוד,08-8566677,emergency@ashdodvet.co.il,הבנים 15,אשדוד,emergency_vet,true,
