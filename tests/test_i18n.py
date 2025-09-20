@@ -48,6 +48,7 @@ async def test_handle_language_selection_updates_context():
             username="testuser",
             full_name="Test User",
             language_code="he",
+            first_name="Test",
         ),
     )
     # Patch i18n setter if needed
