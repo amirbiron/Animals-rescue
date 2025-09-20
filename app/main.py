@@ -202,8 +202,8 @@ async def lifespan(app: FastAPI):
         # Redis is critical for background jobs
         raise
     
-    # Start background workers if not in testing mode
-    if not settings.is_testing:
+    # Start background workers if enabled and not in testing mode
+    if not settings.is_testing and settings.ENABLE_WORKERS:
         try:
             from app.workers.manager import start_workers
             await start_workers()
