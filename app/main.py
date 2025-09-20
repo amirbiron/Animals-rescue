@@ -541,6 +541,9 @@ async def health_check():
     try:
         db_health = await check_database_health()
         health_data["services"]["database"] = db_health
+        # Bubble up concise PostGIS status when available
+        if isinstance(db_health, dict) and "postgis" in db_health:
+            health_data["services"]["postgis"] = db_health["postgis"]
     except Exception as e:
         health_data["services"]["database"] = {
             "status": "unhealthy",
