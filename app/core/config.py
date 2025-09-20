@@ -128,14 +128,24 @@ class Settings(BaseSettings):
     def assemble_redis_urls(self) -> 'Settings':
         """Assemble Redis URLs if not provided explicitly via env variables."""
         # Prefer fully specified REDIS_URL; also support providers that expose REDIS_TLS_URL
+        tls_url = os.getenv("REDIS_TLS_URL")
+        # If REDIS_URL not given, use REDIS_TLS_URL when available; otherwise compose non-TLS URL
         if not self.REDIS_URL:
-            tls_url = os.getenv("REDIS_TLS_URL")
             if tls_url:
                 object.__setattr__(self, "REDIS_URL", tls_url)
             else:
                 auth_part = f":{self.REDIS_PASSWORD}@" if self.REDIS_PASSWORD else ""
                 url = f"redis://{auth_part}{self.REDIS_HOST}:{self.REDIS_PORT}/{self.REDIS_DB}"
                 object.__setattr__(self, "REDIS_URL", url)
+        else:
+            # If both variables are present and TLS URL is secure (rediss://) while REDIS_URL is non-TLS,
+            # prefer the TLS URL to avoid provider TLS mismatches (e.g., Render/Heroku).
+            try:
+                if isinstance(self.REDIS_URL, str) and self.REDIS_URL.startswith("redis://") and tls_url and tls_url.startswith("rediss://"):
+                    object.__setattr__(self, "REDIS_URL", tls_url)
+            except Exception:
+                # Be conservative; ignore on any parsing/typing issue
+                pass
 
         # Derive REDIS_QUEUE_URL from REDIS_URL when not explicitly set, keeping same host/auth and switching DB to 1
         if not self.REDIS_QUEUE_URL:
