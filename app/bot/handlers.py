@@ -2556,7 +2556,12 @@ async def handle_admin_import_location_inputs(update: Update, context: ContextTy
             logger.info("import_location_google_results", clinics=len(clinics or []), shelters=len(shelters or []))
             async with async_session_maker() as session:
                 from sqlalchemy import select
+                seen_place_ids = set()
                 for place in places:
+                    place_id = place.get("place_id")
+                    if not place_id or place_id in seen_place_ids:
+                        continue
+                    seen_place_ids.add(place_id)
                     exists = await session.execute(select(Organization).where(Organization.google_place_id == place["place_id"]))
                     if exists.scalar_one_or_none():
                         continue
@@ -2641,7 +2646,15 @@ async def handle_admin_import_google_input(update: Update, context: ContextTypes
             logger.info("import_google_city_results", city=city, clinics=len(clinics or []), shelters=len(shelters or []))
             async with async_session_maker() as session:
                 from sqlalchemy import select
+                # Deduplicate by place_id (in-memory) to avoid double inserts when lists overlap
+                seen_place_ids = set()
                 for place in places:
+                    place_id = place.get("place_id")
+                    if not place_id:
+                        continue
+                    if place_id in seen_place_ids:
+                        continue
+                    seen_place_ids.add(place_id)
                     exists = await session.execute(select(Organization).where(Organization.google_place_id == place["place_id"]))
                     if exists.scalar_one_or_none():
                         continue
