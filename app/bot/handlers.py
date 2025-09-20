@@ -1164,9 +1164,62 @@ async def initialize_bot() -> None:
 # Export
 # =============================================================================
 
+_polling_task = None
+
+
+async def start_polling_if_needed() -> bool:
+    """Start Telegram polling in background when webhook is not configured.
+
+    Returns True if polling was started (or already running), False if webhook mode.
+    """
+    # If webhook configured, do not start polling
+    if settings.WEBHOOK_HOST and settings.TELEGRAM_WEBHOOK_URL:
+        return False
+
+    global _polling_task
+    # Avoid double start
+    if _polling_task and not _polling_task.done():
+        return True
+
+    # Ensure application is initialized and started before polling
+    try:
+        await bot_application.initialize()
+    except Exception:
+        # It's OK if already initialized
+        pass
+    await bot_application.start()
+
+    # Run polling without blocking the event loop
+    import asyncio as _asyncio
+    _polling_task = _asyncio.create_task(bot_application.updater.start_polling())
+    logger.info("📡 Telegram polling started")
+    return True
+
+
+async def shutdown_bot() -> None:
+    """Gracefully stop polling and shutdown the bot application."""
+    global _polling_task
+    try:
+        if getattr(bot_application, "updater", None):
+            await bot_application.updater.stop()
+    except Exception:
+        pass
+    try:
+        await bot_application.stop()
+    except Exception:
+        pass
+    try:
+        await bot_application.shutdown()
+    except Exception:
+        pass
+    _polling_task = None
+
+
 __all__ = [
     "bot_application",
-    "bot", 
+    "bot",
     "initialize_bot",
     "create_bot_application",
+    "start_polling_if_needed",
+    "shutdown_bot",
 ]
