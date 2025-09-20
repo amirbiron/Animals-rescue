@@ -76,6 +76,8 @@ class GoogleService:
             "threshold": 5,  # Number of failures before opening
             "timeout": 300,  # 5 minutes before trying again
         }
+        # User agent for external services (e.g., OSM/Nominatim)
+        self._user_agent = f"{settings.APP_NAME}/{settings.APP_VERSION}"
     
     async def __aenter__(self):
         return self
@@ -550,7 +552,8 @@ class GoogleService:
         """
         if not self.geocoding_api_key:
             logger.warning("Google Geocoding API key not configured")
-            return None
+            # Fallback to OpenStreetMap Nominatim
+            return await self._fallback_geocode_osm(address, language=language, region=region)
         
         # Check circuit breaker
         if self._is_circuit_breaker_open():
@@ -587,13 +590,19 @@ class GoogleService:
             
             if data.get("status") != "OK":
                 if data.get("status") == "ZERO_RESULTS":
-                    return None
+                    # Try fallback to OSM which might have better local coverage
+                    fallback = await self._fallback_geocode_osm(address, language=language, region=region)
+                    return fallback
                 
                 error_message = data.get("error_message", "Unknown API error")
-                logger.error("Google Geocoding API error", error=error_message)
+                logger.error("Google Geocoding API error", error=error_message, status=data.get("status"))
                 
-                if data.get("status") == "OVER_QUERY_LIMIT":
+                if data.get("status") in {"OVER_QUERY_LIMIT", "REQUEST_DENIED", "INVALID_REQUEST", "UNKNOWN_ERROR"}:
                     self._record_failure()
+                    # Try OSM fallback before giving up
+                    fallback = await self._fallback_geocode_osm(address, language=language, region=region)
+                    if fallback:
+                        return fallback
                     return await self._get_cached_geocoding(address, language)
                 
                 raise ExternalServiceError(f"Google Geocoding API error: {error_message}")
@@ -642,7 +651,13 @@ class GoogleService:
             self._record_failure()
             logger.error("Geocoding failed", address=address, error=str(e))
             
-            # Try cached version
+            # Try OSM fallback, then cached version
+            try:
+                fallback = await self._fallback_geocode_osm(address, language=language, region=region)
+                if fallback:
+                    return fallback
+            except Exception:
+                pass
             return await self._get_cached_geocoding(address, language)
     
     async def reverse_geocode(
@@ -664,7 +679,8 @@ class GoogleService:
         """
         if not self.geocoding_api_key:
             logger.warning("Google Geocoding API key not configured")
-            return None
+            # Fallback to OpenStreetMap Nominatim
+            return await self._fallback_reverse_geocode_osm(latitude, longitude, language=language)
         
         # Check circuit breaker
         if self._is_circuit_breaker_open():
@@ -700,13 +716,21 @@ class GoogleService:
             
             if data.get("status") != "OK":
                 if data.get("status") == "ZERO_RESULTS":
-                    return None
+                    # Fallback to OSM which may return neighborhood/road
+                    return await self._fallback_reverse_geocode_osm(latitude, longitude, language=language)
                 
                 error_message = data.get("error_message", "Unknown API error")
-                logger.error("Google Reverse Geocoding API error", error=error_message)
+                logger.error("Google Reverse Geocoding API error", error=error_message, status=data.get("status"))
                 
-                if data.get("status") == "OVER_QUERY_LIMIT":
+                if data.get("status") in {"OVER_QUERY_LIMIT", "REQUEST_DENIED", "INVALID_REQUEST", "UNKNOWN_ERROR"}:
                     self._record_failure()
+                    # Try OSM fallback first
+                    try:
+                        fallback = await self._fallback_reverse_geocode_osm(latitude, longitude, language=language)
+                        if fallback:
+                            return fallback
+                    except Exception:
+                        pass
                     return await self._get_cached_reverse_geocoding(latitude, longitude, language)
                 
                 raise ExternalServiceError(f"Google Reverse Geocoding API error: {error_message}")
@@ -745,6 +769,7 @@ class GoogleService:
             
             reverse_geocoding_result = {
                 "formatted_address": result.get("formatted_address"),
+                "address": result.get("formatted_address"),
                 "city": components.get("city"),
                 "components": components,
                 "location_type": result.get("geometry", {}).get("location_type"),
@@ -764,8 +789,103 @@ class GoogleService:
             self._record_failure()
             logger.error("Reverse geocoding failed", lat=latitude, lng=longitude, error=str(e))
             
-            # Try cached version
+            # Try OSM fallback, then cached version
+            try:
+                fallback = await self._fallback_reverse_geocode_osm(latitude, longitude, language=language)
+                if fallback:
+                    return fallback
+            except Exception:
+                pass
             return await self._get_cached_reverse_geocoding(latitude, longitude, language)
+
+    async def _fallback_geocode_osm(
+        self,
+        address: str,
+        language: str = "he",
+        region: Optional[str] = "il",
+    ) -> Optional[Dict[str, Any]]:
+        """Fallback geocoding using OpenStreetMap Nominatim service."""
+        try:
+            params = {
+                "q": address,
+                "format": "jsonv2",
+                "addressdetails": 1,
+                "limit": 1,
+                "accept-language": language,
+            }
+            if region:
+                params["countrycodes"] = region
+            headers = {"User-Agent": self._user_agent}
+            url = "https://nominatim.openstreetmap.org/search"
+            response = await self.client.get(url, params=params, headers=headers)
+            response.raise_for_status()
+            results = response.json()
+            if not results:
+                return None
+            item = results[0]
+            address_dict = item.get("address", {}) or {}
+            city = address_dict.get("city") or address_dict.get("town") or address_dict.get("village")
+            confidence = 0.6 if item.get("type") in {"house", "building", "address"} else 0.5
+            return {
+                "latitude": float(item.get("lat")),
+                "longitude": float(item.get("lon")),
+                "formatted_address": item.get("display_name"),
+                "address": item.get("display_name"),
+                "components": {
+                    "city": city,
+                    "country": address_dict.get("country"),
+                    "state": address_dict.get("state"),
+                    "postal_code": address_dict.get("postcode"),
+                },
+                "location_type": item.get("type"),
+                "confidence": confidence,
+                "city": city,
+            }
+        except Exception as e:
+            logger.warning("OSM geocoding fallback failed", error=str(e))
+            return None
+
+    async def _fallback_reverse_geocode_osm(
+        self,
+        latitude: float,
+        longitude: float,
+        language: str = "he",
+    ) -> Optional[Dict[str, Any]]:
+        """Fallback reverse geocoding using OpenStreetMap Nominatim service."""
+        try:
+            params = {
+                "lat": latitude,
+                "lon": longitude,
+                "format": "jsonv2",
+                "addressdetails": 1,
+                "accept-language": language,
+            }
+            headers = {"User-Agent": self._user_agent}
+            url = "https://nominatim.openstreetmap.org/reverse"
+            response = await self.client.get(url, params=params, headers=headers)
+            response.raise_for_status()
+            data = response.json()
+            address_dict = (data or {}).get("address", {}) or {}
+            city = address_dict.get("city") or address_dict.get("town") or address_dict.get("village")
+            display_name = (data or {}).get("display_name")
+            # Confidence heuristic
+            confidence = 0.6 if address_dict.get("house_number") else 0.5
+            return {
+                "formatted_address": display_name,
+                "address": display_name,
+                "city": city,
+                "components": {
+                    "city": city,
+                    "country": address_dict.get("country"),
+                    "state": address_dict.get("state"),
+                    "postal_code": address_dict.get("postcode"),
+                },
+                "location_type": data.get("type"),
+                "confidence": confidence,
+            }
+        except Exception as e:
+            logger.warning("OSM reverse geocoding fallback failed", error=str(e))
+            return None
     
     def _calculate_geocoding_confidence(self, result: Dict[str, Any]) -> float:
         """Calculate confidence score for geocoding result."""

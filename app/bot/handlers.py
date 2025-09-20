@@ -156,6 +156,35 @@ def get_user_language(context: ContextTypes.DEFAULT_TYPE) -> str:
     return context.user_data.get(USER_DATA_KEYS["language"], settings.DEFAULT_LANGUAGE)
 
 
+def _normalize_hebrew_address(address: str) -> str:
+    """Normalize common Hebrew address forms to improve geocoding success.
+    למשל: "ת"א" => "תל אביב-יפו", הסרת גרשיים, המרת מקפים, טיפול בקיצורים.
+    """
+    if not address:
+        return address
+    text = address.strip()
+    # Remove extraneous quotes
+    text = text.replace('"', '').replace("'", "")
+    # Common city abbreviations
+    replacements = {
+        "ת" + "א": "תל אביב-יפו",
+        "ת א": "תל אביב-יפו",
+        "ת" + "" + "א": "תל אביב-יפו",
+        "ת" + '"' + "א": "תל אביב-יפו",
+        "תל אביב": "תל אביב-יפו",
+        "י-ם": "ירושלים",
+        "ב" + '"' + "ש": "באר שבע",
+        "ב" + '"' + "ש": "באר שבע",
+        "ב" + '"' + "ש": "באר שבע",
+    }
+    for key, value in replacements.items():
+        if key in text:
+            text = text.replace(key, value)
+    # Normalize dash variants
+    text = text.replace("–", "-").replace("—", "-")
+    return text
+
+
 async def set_typing_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show typing indicator to user."""
     await context.bot.send_chat_action(
@@ -226,22 +255,27 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             one_time_keyboard=False
         )
         
-        await update.message.reply_text(
-            welcome_text,
-            reply_markup=reply_markup,
-            parse_mode=ParseMode.HTML
-        )
+        # reply safely whether message exists or only callback/effective_message
+        target_message = getattr(update, 'message', None) or getattr(update, 'effective_message', None)
+        if target_message is not None:
+            await target_message.reply_text(
+                welcome_text,
+                reply_markup=reply_markup,
+                parse_mode=ParseMode.HTML
+            )
         
     except RateLimitExceeded as e:
-        await update.message.reply_text(
-            get_text("rate_limit_exceeded", get_user_language(context))
-        )
+        msg = get_text("rate_limit_exceeded", get_user_language(context))
+        target_message = getattr(update, 'message', None) or getattr(update, 'effective_message', None)
+        if target_message is not None:
+            await target_message.reply_text(msg)
         
     except Exception as e:
         logger.error("Error in start command", error=str(e), exc_info=True)
-        await update.message.reply_text(
-            get_text("error_generic", get_user_language(context))
-        )
+        msg = get_text("error_generic", get_user_language(context))
+        target_message = getattr(update, 'message', None) or getattr(update, 'effective_message', None)
+        if target_message is not None:
+            await target_message.reply_text(msg)
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -491,10 +525,12 @@ async def request_location(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     ]
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     
-    await update.message.reply_text(
-        location_text,
-        reply_markup=reply_markup
-    )
+    msg_target = getattr(update, 'message', None) or getattr(update, 'effective_message', None)
+    if msg_target is not None:
+        await msg_target.reply_text(
+            location_text,
+            reply_markup=reply_markup
+        )
     
     return WAITING_FOR_LOCATION
 
@@ -513,7 +549,7 @@ async def handle_location(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         
         location_data = None
         
-        if update.message.location:
+        if getattr(update, 'message', None) and update.message.location:
             # GPS location received
             location = update.message.location
             location_data = {
@@ -528,13 +564,17 @@ async def handle_location(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                 address_info = await geocoding_service.reverse_geocode(
                     location.latitude, location.longitude
                 )
-                location_data.update(address_info)
+                if address_info:
+                    location_data.update(address_info)
+                else:
+                    location_data["address"] = get_text("address_unavailable", lang)
+                    location_data["city"] = None
             except Exception as e:
                 logger.warning("Reverse geocoding failed", error=str(e))
                 location_data["address"] = get_text("address_unavailable", lang)
                 location_data["city"] = None
             
-        elif update.message.text:
+        elif getattr(update, 'message', None) and update.message.text:
             # Manual address entered
             address = update.message.text.strip()
             
@@ -548,7 +588,9 @@ async def handle_location(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             
             try:
                 # Geocode address
-                geocode_result = await geocoding_service.geocode(address)
+                # Normalize common Hebrew city abbreviations before geocoding
+                normalized = _normalize_hebrew_address(address)
+                geocode_result = await geocoding_service.geocode(normalized)
                 if geocode_result:
                     location_data = {
                         "address": address,
@@ -579,14 +621,16 @@ async def handle_location(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         
         # Confirm location
         confirmation_text = get_text("location_confirmed", lang).format(
-            address=location_data.get("address", get_text("coordinates_only", lang)),
-            city=location_data.get("city", get_text("unknown_city", lang))
+            address=(location_data.get("address") or location_data.get("formatted_address") or get_text("coordinates_only", lang)),
+            city=(location_data.get("city") or get_text("unknown_city", lang))
         )
         
-        await update.message.reply_text(
-            confirmation_text,
-            reply_markup=ReplyKeyboardRemove()
-        )
+        msg_target = getattr(update, 'message', None) or getattr(update, 'effective_message', None)
+        if msg_target is not None:
+            await msg_target.reply_text(
+                confirmation_text,
+                reply_markup=ReplyKeyboardRemove()
+            )
         
         # Move to description
         return await request_description(update, context)
@@ -626,12 +670,14 @@ async def handle_description(update: Update, context: ContextTypes.DEFAULT_TYPE)
         Next conversation state
     """
     lang = get_user_language(context)
-    description = update.message.text.strip()
+    description = (getattr(update, 'message', None) and update.message.text or "").strip()
     
     if not description or len(description) < 10:
-        await update.message.reply_text(
-            get_text("description_too_short", lang)
-        )
+        target_message = getattr(update, 'message', None) or getattr(update, 'effective_message', None)
+        if target_message is not None:
+            await target_message.reply_text(
+                get_text("description_too_short", lang)
+            )
         return WAITING_FOR_DESCRIPTION
     
     try:
@@ -692,9 +738,11 @@ async def handle_description(update: Update, context: ContextTypes.DEFAULT_TYPE)
         
     except Exception as e:
         logger.error("Error handling description", error=str(e))
-        await update.message.reply_text(
-            get_text("error_description", lang)
-        )
+        target_message = getattr(update, 'message', None) or getattr(update, 'effective_message', None)
+        if target_message is not None:
+            await target_message.reply_text(
+                get_text("error_description", lang)
+            )
         return WAITING_FOR_DESCRIPTION
 
 
@@ -925,18 +973,24 @@ async def submit_report(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
                 parse_mode=ParseMode.HTML
             )
         else:
-            await update.message.reply_text(
-                success_text,
-                reply_markup=reply_markup,
-                parse_mode=ParseMode.HTML
-            )
+            target_message = getattr(update, 'message', None) or getattr(update, 'effective_message', None)
+            if target_message is not None:
+                await target_message.reply_text(
+                    success_text,
+                    reply_markup=reply_markup,
+                    parse_mode=ParseMode.HTML
+                )
         
         # Clean up user data
         context.user_data.clear()
         
         # Show main menu again
         await asyncio.sleep(2)  # Brief pause
-        await start_command(update, context)
+        try:
+            await start_command(update, context)
+        except Exception as e:
+            # Do not fail the flow if welcome/menu fails; just log and continue
+            logger.warning("Failed to show main menu after submission", error=str(e))
         
         # Update metrics
         from app.main import REPORTS_CREATED
@@ -963,7 +1017,14 @@ async def submit_report(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
         if update.callback_query:
             await update.callback_query.message.reply_text(error_text)
         else:
-            await update.message.reply_text(error_text)
+            # Avoid sending error after we already showed success
+            # Only send error if we have not announced success yet (no reply_markup in recent message)
+            try:
+                target_message = getattr(update, 'message', None) or getattr(update, 'effective_message', None)
+                if target_message is not None:
+                    await target_message.reply_text(error_text)
+            except Exception:
+                pass
         
         return ConversationHandler.END
 
