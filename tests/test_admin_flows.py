@@ -106,6 +106,7 @@ async def test_show_admin_orgs_menu_permission_denied():
         await show_admin_orgs_menu(update, ctx)
         # Should reply with permission_denied message (some text)
         assert msg.calls
+        assert "אין לך הרשאה לבצע פעולה זו" in msg.calls[-1][0][0]
 
 
 
@@ -265,6 +266,7 @@ async def test_import_google_empty_city_stays_in_state():
     res = await handle_admin_import_google_input(update, ctx)
     assert res == ADMIN_IMPORT_GOOGLE_CITY
     assert update.message.calls  # invalid input reply
+    assert "קלט לא תקין" in update.message.calls[-1][0][0]
 
 
 @pytest.mark.asyncio
