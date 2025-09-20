@@ -318,24 +318,31 @@ async def test_import_location_success_flow():
     assert state == ADMIN_IMPORT_LOCATION_INPUT
     assert ctx.user_data.get("awaiting_import_location") is True
 
+    # Unknown radius text should keep waiting
+    msg_unknown = MsgStub(text="רדיוס 7 ק""מ")
+    res_u = await handle_admin_import_location_inputs(types.SimpleNamespace(message=msg_unknown, effective_user=None, effective_chat=None), ctx)
+    assert res_u == ADMIN_IMPORT_LOCATION_INPUT
+
     # Choose radius
     msg_r = MsgStub(text="רדיוס 10 ק""מ")
     res_r = await handle_admin_import_location_inputs(types.SimpleNamespace(message=msg_r, effective_user=None, effective_chat=None), ctx)
     assert res_r == ADMIN_IMPORT_LOCATION_INPUT
     assert ctx.user_data.get("import_radius_m") == 10000
 
-    # Send location with mocked Google
+    # Send location with mocked Google and simulate dedup (second place duplicates)
     class _DummyGoogle:
         async def __aenter__(self):
             return self
         async def __aexit__(self, exc_type, exc, tb):
             return False
         async def search_veterinary_nearby(self, loc, radius: int):
-            return [{"name": "Vet", "place_id": "v1"}]
+            return [{"name": "Vet", "place_id": "dup"}]
         async def search_shelters_nearby(self, loc, radius: int):
-            return [{"name": "Shelter", "place_id": "s1"}]
+            return [{"name": "Shelter", "place_id": "dup"}]
 
     class _FakeSession:
+        def __init__(self):
+            self.added = 0
         async def __aenter__(self):
             return self
         async def __aexit__(self, exc_type, exc, tb):
@@ -343,10 +350,14 @@ async def test_import_location_success_flow():
         async def execute(self, *a, **k):
             class _R:
                 def scalar_one_or_none(self_inner):
+                    # First call returns None (not exists), second returns a truthy object -> dedup
+                    if getattr(self_inner, "_called", False):
+                        return object()
+                    self_inner._called = True
                     return None
             return _R()
         def add(self, *a, **k):
-            return None
+            self.added += 1
         async def commit(self):
             return None
 
@@ -361,3 +372,48 @@ async def test_import_location_success_flow():
             assert "awaiting_import_location" not in ctx.user_data
             assert "import_radius_m" not in ctx.user_data
             assert msg_loc.calls  # completion reply
+
+
+@pytest.mark.asyncio
+async def test_import_google_city_dedup():
+    ctx = make_context()
+    # Start and move to awaiting city
+    state = await handle_admin_import_google(types.SimpleNamespace(callback_query=CqStub(data="admin_import_google"), effective_user=None, effective_chat=None), ctx)
+    assert state == ADMIN_IMPORT_GOOGLE_CITY
+
+    class _DummyGoogle:
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+        async def search_veterinary_clinics(self, city: str):
+            return [{"name": "Vet", "place_id": "dup"}]
+        async def search_animal_shelters(self, city: str):
+            return [{"name": "Shelter", "place_id": "dup"}]
+
+    class _FakeSession:
+        def __init__(self):
+            self.added = 0
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+        async def execute(self, *a, **k):
+            class _R:
+                def scalar_one_or_none(self_inner):
+                    if getattr(self_inner, "_called", False):
+                        return object()
+                    self_inner._called = True
+                    return None
+            return _R()
+        def add(self, *a, **k):
+            self.added += 1
+        async def commit(self):
+            return None
+
+    with patch("app.services.google.GoogleService", return_value=_DummyGoogle()):
+        with patch("app.bot.handlers.async_session_maker", return_value=_FakeSession()):
+            msg = MsgStub(text="רעננה")
+            end = await handle_admin_import_google_input(types.SimpleNamespace(message=msg, effective_user=None, effective_chat=None), ctx)
+            assert end == ConversationHandler.END
+            assert msg.calls  # completion reply
