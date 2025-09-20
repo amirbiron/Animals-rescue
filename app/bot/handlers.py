@@ -2386,6 +2386,7 @@ async def show_admin_orgs_menu(update: Update, context: ContextTypes.DEFAULT_TYP
     """Show admin organizations management menu."""
     lang = get_user_language(context)
     user = update.effective_user
+    logger.info("enter_show_admin_orgs_menu", user_id=getattr(user, "id", None), chat_id=getattr(update.effective_chat, "id", None))
     
     # Check admin permission
     db_user = await get_or_create_user(user)
@@ -2478,6 +2479,7 @@ async def handle_admin_import_google(update: Update, context: ContextTypes.DEFAU
     query = update.callback_query
     await query.answer()
     lang = get_user_language(context)
+    logger.info("enter_handle_admin_import_google", user_id=getattr(update.effective_user, "id", None), chat_id=getattr(update.effective_chat, "id", None))
     context.user_data["awaiting_google_city"] = True
     await query.edit_message_text("הכנס שם עיר לייבוא קליניקות ומקלטים (באנגלית/עברית)")
 
@@ -2486,6 +2488,7 @@ async def handle_admin_import_location(update: Update, context: ContextTypes.DEF
     query = update.callback_query
     await query.answer()
     lang = get_user_language(context)
+    logger.info("enter_handle_admin_import_location", user_id=getattr(update.effective_user, "id", None), chat_id=getattr(update.effective_chat, "id", None))
     context.user_data["awaiting_import_location"] = True
     keyboard = [
         [KeyboardButton(get_text("share_location", lang), request_location=True)],
@@ -2498,6 +2501,14 @@ async def handle_admin_import_location(update: Update, context: ContextTypes.DEF
 
 async def handle_admin_import_location_inputs(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Collect location and radius, then import nearby orgs."""
+    logger.info(
+        "enter_handle_admin_import_location_inputs",
+        awaiting_import_location=bool(context.user_data.get("awaiting_import_location")),
+        text=(getattr(update, 'message', None) and getattr(update.message, 'text', None)),
+        has_location=bool(getattr(update, 'message', None) and getattr(update.message, 'location', None)),
+        user_id=getattr(update.effective_user, "id", None),
+        chat_id=getattr(update.effective_chat, "id", None),
+    )
     if not context.user_data.get("awaiting_import_location"):
         return
     lang = get_user_language(context)
@@ -2511,6 +2522,7 @@ async def handle_admin_import_location_inputs(update: Update, context: ContextTy
     }
     if text in radius_map:
         context.user_data["import_radius_m"] = radius_map[text]
+        logger.info("import_location_radius_selected", radius_m=radius_map[text])
         await update.message.reply_text("עכשיו שלח את המיקום שלך (כפתור 'שתף מיקום')")
         return
     if getattr(update, 'message', None) and update.message.location:
@@ -2524,6 +2536,7 @@ async def handle_admin_import_location_inputs(update: Update, context: ContextTy
                 clinics = await google.search_veterinary_nearby((loc.latitude, loc.longitude), radius=radius)
                 shelters = await google.search_shelters_nearby((loc.latitude, loc.longitude), radius=radius)
             places = clinics + shelters
+            logger.info("import_location_google_results", clinics=len(clinics or []), shelters=len(shelters or []))
             async with async_session_maker() as session:
                 from sqlalchemy import select
                 for place in places:
@@ -2551,12 +2564,14 @@ async def handle_admin_import_location_inputs(update: Update, context: ContextTy
                     created += 1
                 await session.commit()
         except Exception as e:
+            logger.error("import_location_failed", error=str(e))
             await update.message.reply_text(f"שגיאה בייבוא: {e}")
             context.user_data.pop("awaiting_import_location", None)
             context.user_data.pop("import_radius_m", None)
             return
         context.user_data.pop("awaiting_import_location", None)
         context.user_data.pop("import_radius_m", None)
+        logger.info("import_location_completed", created=created, radius_m=radius)
         await update.message.reply_text(
             f"ייבוא לפי מיקום הושלם. נוספו {created} ארגונים חדשים ברדיוס {int(radius/1000)} ק""מ.",
             reply_markup=ReplyKeyboardRemove()
@@ -2565,6 +2580,13 @@ async def handle_admin_import_location_inputs(update: Update, context: ContextTy
 
 async def handle_admin_import_google_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     # Guard: only act when awaiting city input
+    logger.info(
+        "enter_handle_admin_import_google_input",
+        awaiting_google_city=bool(context.user_data.get("awaiting_google_city")),
+        text=(getattr(update, 'message', None) and getattr(update.message, 'text', None)),
+        user_id=getattr(update.effective_user, "id", None),
+        chat_id=getattr(update.effective_chat, "id", None),
+    )
     if not context.user_data.get("awaiting_google_city"):
         return
     lang = get_user_language(context)
@@ -2595,6 +2617,7 @@ async def handle_admin_import_google_input(update: Update, context: ContextTypes
                 clinics = await google.search_veterinary_clinics(city)
                 shelters = await google.search_animal_shelters(city)
             places = clinics + shelters
+            logger.info("import_google_city_results", city=city, clinics=len(clinics or []), shelters=len(shelters or []))
             async with async_session_maker() as session:
                 from sqlalchemy import select
                 for place in places:
@@ -2622,12 +2645,14 @@ async def handle_admin_import_google_input(update: Update, context: ContextTypes
                     created += 1
                 await session.commit()
         except Exception as e:
+            logger.error("import_google_city_failed", city=city, error=str(e))
             await update.message.reply_text(f"שגיאה בייבוא: {e}")
             context.user_data.pop("awaiting_google_city", None)
             return
 
         # Clear flag and report result
         context.user_data.pop("awaiting_google_city", None)
+    logger.info("import_google_city_completed", city=city, created=created)
         await update.message.reply_text(f"ייבוא מגוגל הושלם. נוספו {created} ארגונים חדשים בעיר {city}.")
 
 
@@ -2837,11 +2862,20 @@ async def handle_admin_add_org(update: Update, context: ContextTypes.DEFAULT_TYP
     query = update.callback_query
     await query.answer()
     lang = get_user_language(context)
+    logger.info("enter_handle_admin_add_org", user_id=getattr(update.effective_user, "id", None), chat_id=getattr(update.effective_chat, "id", None))
     context.user_data["add_org"] = {"step": "name"}
     await query.edit_message_text(get_text("add_organization", lang) + "\n\n" + get_text("prompt_org_name", lang))
 
 
 async def handle_admin_add_org_name_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    logger.info(
+        "enter_handle_admin_add_org_name_input",
+        in_flow=bool(context.user_data.get("add_org")),
+        step=(context.user_data.get("add_org", {}).get("step") if context.user_data.get("add_org") else None),
+        text=(getattr(update, 'message', None) and getattr(update.message, 'text', None)),
+        user_id=getattr(update.effective_user, "id", None),
+        chat_id=getattr(update.effective_chat, "id", None),
+    )
     if not context.user_data.get("add_org") or context.user_data.get("add_org", {}).get("step") != "name":
         return
     lang = get_user_language(context)
@@ -2849,6 +2883,7 @@ async def handle_admin_add_org_name_input(update: Update, context: ContextTypes.
     if not name:
         await update.message.reply_text(get_text("invalid_input", lang))
         return
+    logger.info("add_org_name_captured", name=name)
     context.user_data["add_org"] = {"step": "type", "name": name}
     # Show type options
     keyboard = []
@@ -2860,6 +2895,14 @@ async def handle_admin_add_org_name_input(update: Update, context: ContextTypes.
 
 async def handle_admin_add_org_email_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Collect organization email and create the organization."""
+    logger.info(
+        "enter_handle_admin_add_org_email_input",
+        in_flow=bool(context.user_data.get("add_org")),
+        step=(context.user_data.get("add_org", {}).get("step") if context.user_data.get("add_org") else None),
+        text=(getattr(update, 'message', None) and getattr(update.message, 'text', None)),
+        user_id=getattr(update.effective_user, "id", None),
+        chat_id=getattr(update.effective_chat, "id", None),
+    )
     if not context.user_data.get("add_org") or context.user_data.get("add_org", {}).get("step") != "email":
         return
     lang = get_user_language(context)
@@ -2868,6 +2911,7 @@ async def handle_admin_add_org_email_input(update: Update, context: ContextTypes
     if not _re.match(r"^[^\s@]+@[^\s@]+\.[^\s@]+$", text):
         await update.message.reply_text(get_text("invalid_email", lang))
         return
+    logger.info("add_org_email_captured")
     add_ctx = context.user_data.get("add_org", {})
     name = add_ctx.get("name")
     org_type = add_ctx.get("org_type")
@@ -2887,12 +2931,20 @@ async def handle_admin_add_org_email_input(update: Update, context: ContextTypes
 
 
 async def handle_admin_add_org_type(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    logger.info(
+        "enter_handle_admin_add_org_type",
+        in_flow=bool(context.user_data.get("add_org")),
+        step=(context.user_data.get("add_org", {}).get("step") if context.user_data.get("add_org") else None),
+        user_id=getattr(update.effective_user, "id", None),
+        chat_id=getattr(update.effective_chat, "id", None),
+    )
     if not context.user_data.get("add_org") or context.user_data.get("add_org", {}).get("step") != "type":
         return
     query = update.callback_query
     await query.answer()
     lang = get_user_language(context)
     org_type = query.data.replace("admin_add_org_type_", "")
+    logger.info("add_org_type_selected", org_type=org_type)
     name = context.user_data.get("add_org", {}).get("name")
     if not name:
         await query.edit_message_text(get_text("operation_failed", lang))
@@ -3643,7 +3695,8 @@ def create_bot_application() -> Application:
     ))
     application.add_handler(MessageHandler(
         filters.TEXT & ~filters.COMMAND,
-        handle_admin_import_google_input
+        handle_admin_import_google_input,
+        block=False
     ))
     # Admin add organization email input
     application.add_handler(MessageHandler(
