@@ -225,9 +225,15 @@ async def lifespan(app: FastAPI):
     # Initialize Telegram bot
     if not settings.is_testing:
         try:
-            from app.bot.handlers import bot, initialize_bot
+            from app.bot.handlers import bot, initialize_bot, start_polling_if_needed
             await initialize_bot()
             logger.info("🤖 Telegram bot initialized")
+            try:
+                started = await start_polling_if_needed()
+                if started:
+                    logger.info("📡 Telegram polling started (webhook not configured)")
+            except Exception as e:
+                logger.error("❌ Telegram polling start failed", error=str(e))
         except Exception as e:
             logger.error("❌ Telegram bot initialization failed", error=str(e))
     
@@ -250,6 +256,13 @@ async def lifespan(app: FastAPI):
         from app.core.cache import redis_client
         await redis_client.close()
         logger.info("📊 Redis connection closed")
+        # Stop Telegram bot/polling gracefully
+        try:
+            from app.bot.handlers import shutdown_bot
+            await shutdown_bot()
+            logger.info("🤖 Telegram bot shutdown completed")
+        except Exception as e:
+            logger.warning("⚠️ Telegram bot shutdown error", error=str(e))
         
     except Exception as e:
         logger.error("⚠️ Error during shutdown", error=str(e))
