@@ -3640,7 +3640,7 @@ def create_bot_application() -> Application:
                 CallbackQueryHandler(handle_admin_add_org_type, pattern="^admin_add_org_type_.*$")
             ],
             ADMIN_ADD_ORG_EMAIL: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_admin_add_org_email_input),
+                MessageHandler((filters.TEXT | filters.LOCATION) & ~filters.COMMAND, handle_admin_add_org_email_input),
             ],
         },
         fallbacks=[],
