@@ -45,6 +45,7 @@
 - Redis 6+  
 - טוקן לבוט טלגרם ([יצירה כאן](https://t.me/BotFather))  
 - מפתחות API של Google (Places & Geocoding)  
+- מפתח ל‑SerpAPI (אופציונלי; לעיבוי פרטי קשר של ארגונים)  
 
 ### התקנה
 1. שכפול הריפו  
@@ -66,6 +67,7 @@
 - Redis  
 - בוט טלגרם + Webhook  
 - Google API Keys  
+- SerpAPI Key  
 - הגדרות SMTP  
 
 משתנים אופציונליים:  
@@ -186,6 +188,7 @@ uvicorn app.main:app --host 0.0.0.0 --port $PORT
 - ENABLE_WORKERS=false (לשירות ה-Web)
 - GOOGLE_PLACES_API_KEY (חיוני)
 - GOOGLE_GEOCODING_API_KEY (אופציונלי; אם לא, נשתמש ב-Places)
+- SERPAPI_KEY (אופציונלי; הפעלה מומלצת להשלמת טלפון/אתר לארגונים)
 
 2) Background Worker (RQ Workers + Scheduler)
 - Build Command:
@@ -204,6 +207,7 @@ python -c "from app.workers.manager import run_workers_cli; run_workers_cli()"
 - WORKER_PROCESSES=2 (לפי עומס)
 - WORKER_TIMEOUT=300 (אופציונלי)
 - GOOGLE_PLACES_API_KEY / GOOGLE_GEOCODING_API_KEY (לסנכרוני Places/Geocoding)
+- SERPAPI_KEY (להעשרת פרטי קשר דרך SerpAPI)
 
 3) שירותים מנוהלים
 - Render PostgreSQL → חשפו `DATABASE_URL`
