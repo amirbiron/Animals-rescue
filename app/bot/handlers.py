@@ -3028,11 +3028,19 @@ async def handle_admin_add_org_email_input(update: Update, context: ContextTypes
     city = add_ctx.get("city")
     address = add_ctx.get("address")
     async with async_session_maker() as session:
+        # Determine alert channels dynamically
+        channels: List[str] = []
+        if text:
+            channels.append("email")
+        if add_ctx.get("latitude") is not None or add_ctx.get("longitude") is not None:
+            # Location doesn't imply channel; keep for future logic
+            pass
+        # Prefer telegram for now only if chat id set later by admin; not at creation
         org = Organization(
             name=name,
             organization_type=OrganizationType(org_type),
             email=text,
-            alert_channels=["email"],
+            alert_channels=channels or ["email"],
             is_active=True,
             is_verified=True,
             latitude=latitude if latitude else None,
@@ -3109,11 +3117,15 @@ async def handle_admin_add_org_skip_email(update: Update, context: ContextTypes.
     address = add_ctx.get("address")
     try:
         async with async_session_maker() as session:
+            # Determine alert channels dynamically
+            channels: List[str] = []
+            # If phone available (from enrichment later), sms/whatsapp can be appended in maintenance jobs.
+            # For creation-without-email, do not default to telegram unless chat id exists.
             org = Organization(
                 name=name,
                 organization_type=OrganizationType(org_type),
                 email=None,
-                alert_channels=["telegram"],
+                alert_channels=channels or ["sms"],
                 is_active=True,
                 is_verified=True,
                 latitude=latitude if latitude else None,
