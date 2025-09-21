@@ -42,6 +42,7 @@ from app.core.config import settings
 from app.core.cache import redis_client
 from app.core.rate_limit import check_rate_limit, RateLimitExceeded
 from app.models.database import async_session_maker, User, Report, ReportFile, UserSettings, Organization
+from app.models.database import create_point_from_coordinates
 from app.models.database import AnimalType, UrgencyLevel, ReportStatus, UserRole, OrganizationType
 from app.services.nlp import NLPService
 from app.services.geocoding import GeocodingService
@@ -2947,15 +2948,71 @@ async def handle_admin_add_org_email_input(update: Update, context: ContextTypes
     if not context.user_data.get("add_org") or context.user_data.get("add_org", {}).get("step") != "email":
         return ADMIN_ADD_ORG_EMAIL
     lang = get_user_language(context)
+    add_ctx = context.user_data.get("add_org", {})
+
+    # First: optional location capture while in email step
+    if getattr(update, 'message', None) and getattr(update.message, 'location', None) and add_ctx.get("awaiting_org_location"):
+        loc = update.message.location
+        try:
+            # Save coordinates immediately
+            add_ctx["latitude"] = float(getattr(loc, 'latitude', None) or 0)
+            add_ctx["longitude"] = float(getattr(loc, 'longitude', None) or 0)
+            # Reverse geocode for city/address (best-effort)
+            try:
+                details = await geocoding_service.reverse_geocode(add_ctx["latitude"], add_ctx["longitude"], language=lang)
+            except Exception:
+                details = None
+            if details:
+                add_ctx["address"] = details.get("address") or details.get("formatted_address")
+                add_ctx["city"] = details.get("city") or details.get("components", {}).get("city")
+                await update.message.reply_text(
+                    get_text("org_location_saved", lang).format(
+                        address=add_ctx.get("address") or get_text("coordinates_only", lang),
+                        city=add_ctx.get("city") or get_text("unknown_city", lang),
+                    ),
+                    reply_markup=ReplyKeyboardRemove(),
+                )
+            else:
+                await update.message.reply_text(
+                    get_text("org_location_saved", lang).format(
+                        address=get_text("coordinates_only", lang),
+                        city=get_text("unknown_city", lang),
+                    ),
+                    reply_markup=ReplyKeyboardRemove(),
+                )
+        finally:
+            add_ctx["awaiting_org_location"] = False
+            context.user_data["add_org"] = add_ctx
+        # Prompt for email again
+        await update.message.reply_text(get_text("email_instructions", lang))
+        return ADMIN_ADD_ORG_EMAIL
+
+    # Allow skipping location by text
     text = (getattr(update, 'message', None) and update.message.text or '').strip()
+    if add_ctx.get("awaiting_org_location") and text:
+        skip_words = {"דלג", "skip"}
+        try:
+            skip_words.add(get_text("skip", lang))
+        except Exception:
+            pass
+        if text.lower() in {w.lower() for w in skip_words}:
+            add_ctx["awaiting_org_location"] = False
+            context.user_data["add_org"] = add_ctx
+            await update.message.reply_text(get_text("email_instructions", lang), reply_markup=ReplyKeyboardRemove())
+            return ADMIN_ADD_ORG_EMAIL
+
+    # Email capture and organization creation
     import re as _re
     if not _re.match(r"^[^\s@]+@[^\s@]+\.[^\s@]+$", text):
         await update.message.reply_text(get_text("invalid_email", lang))
         return ADMIN_ADD_ORG_EMAIL
     logger.info("add_org_email_captured")
-    add_ctx = context.user_data.get("add_org", {})
     name = add_ctx.get("name")
     org_type = add_ctx.get("org_type")
+    latitude = add_ctx.get("latitude")
+    longitude = add_ctx.get("longitude")
+    city = add_ctx.get("city")
+    address = add_ctx.get("address")
     async with async_session_maker() as session:
         org = Organization(
             name=name,
@@ -2964,11 +3021,20 @@ async def handle_admin_add_org_email_input(update: Update, context: ContextTypes
             alert_channels=["email"],
             is_active=True,
             is_verified=True,
+            latitude=latitude if latitude else None,
+            longitude=longitude if longitude else None,
+            city=city,
+            address=address,
         )
+        if latitude and longitude:
+            try:
+                org.location = create_point_from_coordinates(latitude, longitude)
+            except Exception:
+                pass
         session.add(org)
         await session.commit()
     context.user_data.pop("add_org", None)
-    await update.message.reply_text(get_text("org_approved", lang).format(name=name))
+    await update.message.reply_text(get_text("org_approved", lang).format(name=name), reply_markup=ReplyKeyboardRemove())
     return ConversationHandler.END
 
 
@@ -2992,9 +3058,17 @@ async def handle_admin_add_org_type(update: Update, context: ContextTypes.DEFAUL
     if not name:
         await query.edit_message_text(get_text("operation_failed", lang))
         return ADMIN_ADD_ORG_TYPE
-    # Move to email collection step before creation
-    context.user_data["add_org"] = {"step": "email", "name": name, "org_type": org_type}
+    # Move to email collection step; in מקביל, בקשו מיקום (אופציונלי) להכוונת התראות
+    context.user_data["add_org"] = {"step": "email", "name": name, "org_type": org_type, "awaiting_org_location": True}
+    # שמרו טקסט אימייל כדי לא לשבור טסטים קיימים (עריכת ההודעה)
     await query.edit_message_text(get_text("email_instructions", lang))
+    # בקשו מיקום עם מקלדת שיתוף מיקום ו"דלג"
+    try:
+        keyboard = [[KeyboardButton(get_text("share_location", lang), request_location=True)], [KeyboardButton(get_text("skip", lang))]]
+        await query.message.reply_text(get_text("org_request_location", lang), reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True))
+    except Exception:
+        # לא נכשלים אם אין message זמין
+        pass
     logger.info("enter state=email", flow="admin_add_org")
     return ADMIN_ADD_ORG_EMAIL
 

@@ -244,6 +244,11 @@ class Settings(BaseSettings):
         default=None,
         description="Google Geocoding API key (can be same as Places)"
     )
+    # SerpAPI
+    SERPAPI_KEY: Optional[str] = Field(
+        default=None,
+        description="SerpAPI API key for Google Maps scraping"
+    )
     
     # API rate limits
     GOOGLE_API_RATE_LIMIT: int = Field(default=10, description="Google API requests per second")
@@ -635,7 +640,7 @@ if __name__ == "__main__":
     # Remove sensitive information
     sensitive_fields = [
         "SECRET_KEY", "TELEGRAM_BOT_TOKEN", "POSTGRES_PASSWORD",
-        "REDIS_PASSWORD", "GOOGLE_PLACES_API_KEY", "SMTP_PASSWORD",
+        "REDIS_PASSWORD", "GOOGLE_PLACES_API_KEY", "SERPAPI_KEY", "SMTP_PASSWORD",
         "S3_SECRET_ACCESS_KEY", "SENTRY_DSN"
     ]
     

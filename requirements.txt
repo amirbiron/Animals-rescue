@@ -33,6 +33,7 @@ rq-scheduler==0.14.0                 # Scheduled jobs for RQ
 # HTTP Client & External APIs
 # =============================================================================
 googlemaps==4.10.0                   # Google Maps/Places API client
+google-search-results==2.4.2         # SerpAPI Python client (Google Maps)
 
 # =============================================================================
 # File Storage & Processing
