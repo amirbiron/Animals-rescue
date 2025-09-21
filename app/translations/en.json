@@ -23,6 +23,7 @@
   "error_photo_upload": "Photo upload failed.",
   "request_location_instructions": "Share GPS location or type an address.",
   "share_location": "Share location",
+  "skip": "Skip",
   "enter_address_manually": "Enter address manually",
   "address_unavailable": "Address unavailable (coordinates only)",
   "address_not_found": "We couldn't find this address.",

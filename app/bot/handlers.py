@@ -2983,8 +2983,14 @@ async def handle_admin_add_org_email_input(update: Update, context: ContextTypes
         finally:
             add_ctx["awaiting_org_location"] = False
             context.user_data["add_org"] = add_ctx
-        # Prompt for email again
-        await update.message.reply_text(get_text("email_instructions", lang))
+        # Prompt for email again (with inline skip)
+        try:
+            email_skip_kb = InlineKeyboardMarkup(
+                [[InlineKeyboardButton(get_text("skip", lang), callback_data="admin_add_org_skip_email")]]
+            )
+            await update.message.reply_text(get_text("email_instructions", lang), reply_markup=email_skip_kb)
+        except Exception:
+            await update.message.reply_text(get_text("email_instructions", lang))
         return ADMIN_ADD_ORG_EMAIL
 
     # Allow skipping location by text
@@ -3005,6 +3011,14 @@ async def handle_admin_add_org_email_input(update: Update, context: ContextTypes
     import re as _re
     if not _re.match(r"^[^\s@]+@[^\s@]+\.[^\s@]+$", text):
         await update.message.reply_text(get_text("invalid_email", lang))
+        # הציגו שוב הוראות עם כפתור דלג
+        try:
+            email_skip_kb = InlineKeyboardMarkup(
+                [[InlineKeyboardButton(get_text("skip", lang), callback_data="admin_add_org_skip_email")]]
+            )
+            await update.message.reply_text(get_text("email_instructions", lang), reply_markup=email_skip_kb)
+        except Exception:
+            await update.message.reply_text(get_text("email_instructions", lang))
         return ADMIN_ADD_ORG_EMAIL
     logger.info("add_org_email_captured")
     name = add_ctx.get("name")
@@ -3061,7 +3075,13 @@ async def handle_admin_add_org_type(update: Update, context: ContextTypes.DEFAUL
     # Move to email collection step; in מקביל, בקשו מיקום (אופציונלי) להכוונת התראות
     context.user_data["add_org"] = {"step": "email", "name": name, "org_type": org_type, "awaiting_org_location": True}
     # שמרו טקסט אימייל כדי לא לשבור טסטים קיימים (עריכת ההודעה)
-    await query.edit_message_text(get_text("email_instructions", lang))
+    try:
+        email_skip_kb = InlineKeyboardMarkup(
+            [[InlineKeyboardButton(get_text("skip", lang), callback_data="admin_add_org_skip_email")]]
+        )
+        await query.edit_message_text(get_text("email_instructions", lang), reply_markup=email_skip_kb)
+    except Exception:
+        await query.edit_message_text(get_text("email_instructions", lang))
     # בקשו מיקום עם מקלדת שיתוף מיקום ו"דלג"
     try:
         keyboard = [[KeyboardButton(get_text("share_location", lang), request_location=True)], [KeyboardButton(get_text("skip", lang))]]
@@ -3072,6 +3092,48 @@ async def handle_admin_add_org_type(update: Update, context: ContextTypes.DEFAUL
     logger.info("enter state=email", flow="admin_add_org")
     return ADMIN_ADD_ORG_EMAIL
 
+
+async def handle_admin_add_org_skip_email(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Skip capturing email and create the organization without email."""
+    query = update.callback_query
+    await query.answer()
+    if not context.user_data.get("add_org") or context.user_data.get("add_org", {}).get("step") != "email":
+        return ADMIN_ADD_ORG_EMAIL
+    lang = get_user_language(context)
+    add_ctx = context.user_data.get("add_org", {})
+    name = add_ctx.get("name")
+    org_type = add_ctx.get("org_type")
+    latitude = add_ctx.get("latitude")
+    longitude = add_ctx.get("longitude")
+    city = add_ctx.get("city")
+    address = add_ctx.get("address")
+    try:
+        async with async_session_maker() as session:
+            org = Organization(
+                name=name,
+                organization_type=OrganizationType(org_type),
+                email=None,
+                alert_channels=["telegram"],
+                is_active=True,
+                is_verified=True,
+                latitude=latitude if latitude else None,
+                longitude=longitude if longitude else None,
+                city=city,
+                address=address,
+            )
+            if latitude and longitude:
+                try:
+                    org.location = create_point_from_coordinates(latitude, longitude)
+                except Exception:
+                    pass
+            session.add(org)
+            await session.commit()
+    except Exception:
+        await query.edit_message_text(get_text("operation_failed", lang))
+        return ADMIN_ADD_ORG_EMAIL
+    context.user_data.pop("add_org", None)
+    await query.edit_message_text(get_text("org_approved", lang).format(name=name))
+    return ConversationHandler.END
 
 async def handle_admin_org_performance(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
@@ -3641,6 +3703,7 @@ def create_bot_application() -> Application:
             ],
             ADMIN_ADD_ORG_EMAIL: [
                 MessageHandler((filters.TEXT | filters.LOCATION) & ~filters.COMMAND, handle_admin_add_org_email_input),
+                CallbackQueryHandler(handle_admin_add_org_skip_email, pattern="^admin_add_org_skip_email$")
             ],
         },
         fallbacks=[],

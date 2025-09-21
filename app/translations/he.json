@@ -23,6 +23,7 @@
   "error_photo_upload": "שגיאה בהעלאת התמונה.",
   "request_location_instructions": "שלחו מיקום GPS או הקלידו כתובת.",
   "share_location": "שתף מיקום",
+  "skip": "דלג",
   "enter_address_manually": "הכנס כתובת ידנית",
   "address_unavailable": "כתובת לא זמינה (נקלטו רק נקודות ציון)",
   "address_not_found": "לא מצאנו את הכתובת, נסו אחרת.",
