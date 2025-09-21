@@ -637,6 +637,9 @@ def test_admin_add_org_email_state_accepts_location_filter_mapping():
             self.handlers = []
         def add_handler(self, handler):
             self.handlers.append(handler)
+        def add_error_handler(self, handler):
+            # Align with real Application API, no-op for this test
+            return None
 
     class _FakeBuilder:
         def token(self, *_a, **_k):
