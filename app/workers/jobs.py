@@ -283,8 +283,6 @@ async def _reconcile_alert_channels_async() -> Dict[str, int]:
             desired: list[str] = []
             if org.primary_phone:
                 desired.extend(["whatsapp", "sms"])  # prefer WhatsApp first
-            if org.email:
-                desired.append("email")
             if org.telegram_chat_id:
                 desired.append("telegram")
             # Remove duplicates preserving order
