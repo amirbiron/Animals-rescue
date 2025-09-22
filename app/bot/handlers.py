@@ -2985,16 +2985,46 @@ async def handle_admin_add_org_email_input(update: Update, context: ContextTypes
             context.user_data["add_org"] = add_ctx
         # Prompt for email again (with inline skip)
         try:
-            email_skip_kb = InlineKeyboardMarkup(
-                [[InlineKeyboardButton(get_text("skip", lang), callback_data="admin_add_org_skip_email")]]
+            email_actions_kb = InlineKeyboardMarkup(
+                [[
+                    InlineKeyboardButton(get_text("update_phone", lang), callback_data="admin_add_org_add_phone"),
+                    InlineKeyboardButton(get_text("skip", lang), callback_data="admin_add_org_skip_email")
+                ]]
             )
-            await update.message.reply_text(get_text("email_instructions", lang), reply_markup=email_skip_kb)
+            await update.message.reply_text(get_text("email_instructions", lang), reply_markup=email_actions_kb)
         except Exception:
             await update.message.reply_text(get_text("email_instructions", lang))
         return ADMIN_ADD_ORG_EMAIL
 
     # Allow skipping location by text
     text = (getattr(update, 'message', None) and update.message.text or '').strip()
+    # Capture phone if requested during email step
+    if add_ctx.get("awaiting_org_phone") and text:
+        normalized = text.strip()
+        if normalized.startswith("00") and "+" not in normalized:
+            normalized = "+" + normalized[2:]
+        if normalized.startswith("0") and not normalized.startswith("+"):
+            normalized = "+972" + normalized[1:]
+        import re as _re_phone
+        if not _re_phone.match(r"^\+?\d[\d\-\s]{6,}$", normalized):
+            await update.message.reply_text(get_text("invalid_phone", lang))
+            await update.message.reply_text(get_text("phone_instructions", lang))
+            return ADMIN_ADD_ORG_EMAIL
+        add_ctx["primary_phone"] = normalized
+        add_ctx["awaiting_org_phone"] = False
+        context.user_data["add_org"] = add_ctx
+        try:
+            email_actions_kb = InlineKeyboardMarkup(
+                [[
+                    InlineKeyboardButton(get_text("update_phone", lang), callback_data="admin_add_org_add_phone"),
+                    InlineKeyboardButton(get_text("skip", lang), callback_data="admin_add_org_skip_email")
+                ]]
+            )
+            await update.message.reply_text(get_text("phone_updated", lang).format(phone=normalized))
+            await update.message.reply_text(get_text("email_instructions", lang), reply_markup=email_actions_kb)
+        except Exception:
+            await update.message.reply_text(get_text("email_instructions", lang))
+        return ADMIN_ADD_ORG_EMAIL
     if add_ctx.get("awaiting_org_location") and text:
         skip_words = {"דלג", "skip"}
         try:
@@ -3013,10 +3043,13 @@ async def handle_admin_add_org_email_input(update: Update, context: ContextTypes
         # שלבו הודעת שגיאה עם ההוראות כהודעה אחת כדי להבטיח שהטסט מצפה ל"כתובת אימייל לא תקינה" בהודעה האחרונה
         combined = f"{get_text('invalid_email', lang)}\n{get_text('email_instructions', lang)}"
         try:
-            email_skip_kb = InlineKeyboardMarkup(
-                [[InlineKeyboardButton(get_text("skip", lang), callback_data="admin_add_org_skip_email")]]
+            email_actions_kb = InlineKeyboardMarkup(
+                [[
+                    InlineKeyboardButton(get_text("update_phone", lang), callback_data="admin_add_org_add_phone"),
+                    InlineKeyboardButton(get_text("skip", lang), callback_data="admin_add_org_skip_email")
+                ]]
             )
-            await update.message.reply_text(combined, reply_markup=email_skip_kb)
+            await update.message.reply_text(combined, reply_markup=email_actions_kb)
         except Exception:
             await update.message.reply_text(combined)
         return ADMIN_ADD_ORG_EMAIL
@@ -3048,6 +3081,8 @@ async def handle_admin_add_org_email_input(update: Update, context: ContextTypes
             city=city,
             address=address,
         )
+        if add_ctx.get("primary_phone"):
+            org.primary_phone = add_ctx["primary_phone"]
         if latitude and longitude:
             try:
                 org.location = create_point_from_coordinates(latitude, longitude)
@@ -3084,10 +3119,13 @@ async def handle_admin_add_org_type(update: Update, context: ContextTypes.DEFAUL
     context.user_data["add_org"] = {"step": "email", "name": name, "org_type": org_type, "awaiting_org_location": True}
     # שמרו טקסט אימייל כדי לא לשבור טסטים קיימים (עריכת ההודעה)
     try:
-        email_skip_kb = InlineKeyboardMarkup(
-            [[InlineKeyboardButton(get_text("skip", lang), callback_data="admin_add_org_skip_email")]]
+        email_actions_kb = InlineKeyboardMarkup(
+            [[
+                InlineKeyboardButton(get_text("update_phone", lang), callback_data="admin_add_org_add_phone"),
+                InlineKeyboardButton(get_text("skip", lang), callback_data="admin_add_org_skip_email")
+            ]]
         )
-        await query.edit_message_text(get_text("email_instructions", lang), reply_markup=email_skip_kb)
+        await query.edit_message_text(get_text("email_instructions", lang), reply_markup=email_actions_kb)
     except Exception:
         await query.edit_message_text(get_text("email_instructions", lang))
     # בקשו מיקום עם מקלדת שיתוף מיקום ו"דלג"
@@ -3146,6 +3184,18 @@ async def handle_admin_add_org_skip_email(update: Update, context: ContextTypes.
     context.user_data.pop("add_org", None)
     await query.edit_message_text(get_text("org_approved", lang).format(name=name))
     return ConversationHandler.END
+
+
+async def handle_admin_add_org_add_phone(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Prompt for organization phone during add-org email stage and store it."""
+    query = update.callback_query
+    await query.answer()
+    if not context.user_data.get("add_org") or context.user_data.get("add_org", {}).get("step") != "email":
+        return ADMIN_ADD_ORG_EMAIL
+    lang = get_user_language(context)
+    context.user_data["add_org"]["awaiting_org_phone"] = True
+    await query.edit_message_text(get_text("phone_instructions", lang))
+    return ADMIN_ADD_ORG_EMAIL
 
 async def handle_admin_org_performance(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
@@ -3715,7 +3765,8 @@ def create_bot_application() -> Application:
             ],
             ADMIN_ADD_ORG_EMAIL: [
                 MessageHandler((filters.TEXT | filters.LOCATION) & ~filters.COMMAND, handle_admin_add_org_email_input),
-                CallbackQueryHandler(handle_admin_add_org_skip_email, pattern="^admin_add_org_skip_email$")
+                CallbackQueryHandler(handle_admin_add_org_skip_email, pattern="^admin_add_org_skip_email$"),
+                CallbackQueryHandler(handle_admin_add_org_add_phone, pattern="^admin_add_org_add_phone$")
             ],
         },
         fallbacks=[],
