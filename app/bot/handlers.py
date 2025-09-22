@@ -736,7 +736,16 @@ async def handle_location(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                 get_text("enter_address_manually", lang),
                 get_text("share_location", lang)
             ]
+            # Allow skipping manual address and continue
+            try:
+                button_texts.append(get_text("skip", lang))
+            except Exception:
+                pass
             if address in button_texts:
+                # If user chose skip and we already have coordinates stored, proceed
+                if address == get_text("skip", lang) and context.user_data.get(USER_DATA_KEYS["location"]):
+                    context.user_data.pop("allow_manual_address", None)
+                    return await request_description(update, context)
                 return WAITING_FOR_LOCATION
             
             try:
@@ -753,6 +762,7 @@ async def handle_location(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                         "confidence": geocode_result.get("confidence", 0.5),
                         "type": "manual",
                     }
+                    context.user_data.pop("allow_manual_address", None)
                 else:
                     await update.message.reply_text(
                         get_text("address_not_found", lang)
@@ -784,6 +794,23 @@ async def handle_location(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                 confirmation_text,
                 reply_markup=ReplyKeyboardRemove()
             )
+        
+        # If city is unknown, offer manual address entry with Skip option and stay in location state
+        if not location_data.get("city"):
+            try:
+                keyboard = [
+                    [KeyboardButton(get_text("enter_address_manually", lang))],
+                    [KeyboardButton(get_text("skip", lang))],
+                ]
+                reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+                context.user_data["allow_manual_address"] = True
+                await (msg_target or update.message).reply_text(
+                    get_text("request_location_instructions", lang),
+                    reply_markup=reply_markup
+                )
+                return WAITING_FOR_LOCATION
+            except Exception:
+                pass
         
         # Move to description
         return await request_description(update, context)
