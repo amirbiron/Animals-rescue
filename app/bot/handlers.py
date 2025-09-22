@@ -547,13 +547,17 @@ async def start_report_creation(update: Update, context: ContextTypes.DEFAULT_TY
         context.user_data[USER_DATA_KEYS["photos"]] = []
         context.user_data[USER_DATA_KEYS["location"]] = None
         
-        # Request photo
+        # Request photo with option to skip
         instructions = get_text("request_photo_instructions", lang)
+        keyboard = [
+            [KeyboardButton(get_text("continue_with_location", lang))]
+        ]
+        reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
         
-        # Remove main menu keyboard temporarily
+        # Remove main menu keyboard temporarily and show skip option
         await update.message.reply_text(
             instructions,
-            reply_markup=ReplyKeyboardRemove(),
+            reply_markup=reply_markup,
             parse_mode=ParseMode.HTML
         )
         
