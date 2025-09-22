@@ -257,6 +257,47 @@ async def _process_new_report_async(report_id: str) -> Dict[str, Any]:
     return results
 
 
+@job("maintenance", timeout="5m", connection=redis_queue_sync)
+def reconcile_alert_channels() -> Dict[str, int]:
+    """Ensure each organization's alert_channels reflect available contact methods.
+
+    - If organization.email exists, include 'email'
+    - If organization.primary_phone exists, include 'sms' and 'whatsapp'
+    - If organization.telegram_chat_id exists, include 'telegram'
+    - Preserve order preference: whatsapp, sms, email, telegram
+    """
+    logger.info("Reconciling organization alert channels")
+    try:
+        return asyncio.run(_reconcile_alert_channels_async())
+    except Exception as e:
+        logger.error("reconcile_alert_channels failed", error=str(e))
+        raise
+
+
+async def _reconcile_alert_channels_async() -> Dict[str, int]:
+    results = {"processed": 0, "updated": 0}
+    async with async_session_maker() as session:
+        orgs = (await session.execute(select(Organization))).scalars().all()
+        for org in orgs:
+            results["processed"] += 1
+            desired: list[str] = []
+            if org.primary_phone:
+                desired.extend(["whatsapp", "sms"])  # prefer WhatsApp first
+            if org.email:
+                desired.append("email")
+            if org.telegram_chat_id:
+                desired.append("telegram")
+            # Remove duplicates preserving order
+            seen = set()
+            desired_unique = [c for c in desired if not (c in seen or seen.add(c))]
+            current = list(org.alert_channels or [])
+            if desired_unique != current:
+                org.alert_channels = desired_unique or current
+                results["updated"] += 1
+        await session.commit()
+    logger.info("reconcile_alert_channels completed", **results)
+    return results
+
 async def _find_organizations_by_location(
     latitude: float, longitude: float, urgency: UrgencyLevel
 ) -> List[Organization]:
@@ -1431,6 +1472,19 @@ def schedule_recurring_jobs():
         timeout="2m",
         use_local_timezone=False
     )
+    
+    # Reconcile alert channels hourly
+    try:
+        from app.workers.jobs import reconcile_alert_channels  # type: ignore
+        scheduler.cron(
+            cron_string="0 * * * *",
+            func=reconcile_alert_channels,
+            timeout="5m",
+            use_local_timezone=False
+        )
+    except Exception:
+        # In case function not yet imported in certain builds, skip scheduling
+        pass
     
     logger.info("Recurring jobs scheduled")
 
