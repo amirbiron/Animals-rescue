@@ -3010,15 +3010,15 @@ async def handle_admin_add_org_email_input(update: Update, context: ContextTypes
     # Email capture and organization creation
     import re as _re
     if not _re.match(r"^[^\s@]+@[^\s@]+\.[^\s@]+$", text):
-        await update.message.reply_text(get_text("invalid_email", lang))
-        # הציגו שוב הוראות עם כפתור דלג
+        # שלבו הודעת שגיאה עם ההוראות כהודעה אחת כדי להבטיח שהטסט מצפה ל"כתובת אימייל לא תקינה" בהודעה האחרונה
+        combined = f"{get_text('invalid_email', lang)}\n{get_text('email_instructions', lang)}"
         try:
             email_skip_kb = InlineKeyboardMarkup(
                 [[InlineKeyboardButton(get_text("skip", lang), callback_data="admin_add_org_skip_email")]]
             )
-            await update.message.reply_text(get_text("email_instructions", lang), reply_markup=email_skip_kb)
+            await update.message.reply_text(combined, reply_markup=email_skip_kb)
         except Exception:
-            await update.message.reply_text(get_text("email_instructions", lang))
+            await update.message.reply_text(combined)
         return ADMIN_ADD_ORG_EMAIL
     logger.info("add_org_email_captured")
     name = add_ctx.get("name")
