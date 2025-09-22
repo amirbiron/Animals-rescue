@@ -22,7 +22,7 @@ from app.bot.handlers import (
     handle_admin_maintenance_enable,
     handle_admin_maintenance_disable,
 )
-from telegram.ext import ConversationHandler
+from telegram.ext import ConversationHandler, filters
 from telegram import ReplyKeyboardRemove, ReplyKeyboardMarkup
 
 
@@ -626,3 +626,83 @@ async def test_import_location_radius_20_selection():
     res = await handle_admin_import_location_inputs(types.SimpleNamespace(message=msg_r, effective_user=None, effective_chat=None), ctx)
     assert res == ADMIN_IMPORT_LOCATION_INPUT
     assert ctx.user_data.get("import_radius_m") == 20000
+
+
+def test_admin_add_org_email_state_accepts_location_filter_mapping():
+    # Capture created ConversationHandlers
+    created = []
+
+    class _FakeApplication:
+        def __init__(self):
+            self.handlers = []
+        def add_handler(self, handler):
+            self.handlers.append(handler)
+        def add_error_handler(self, handler):
+            # Align with real Application API, no-op for this test
+            return None
+
+    class _FakeBuilder:
+        def token(self, *_a, **_k):
+            return self
+        def build(self):
+            return _FakeApplication()
+
+    class _FakeConversationHandler:
+        def __init__(self, *_, **kwargs):
+            # PTB passes states and name as kwargs in our code path
+            self.states = kwargs.get("states", {})
+            self.name = kwargs.get("name")
+            created.append(self)
+
+    class _FakeMessageHandler:
+        def __init__(self, flt, callback, *a, **k):
+            self.filters = flt
+            self.callback = callback
+
+    # Build application with fakes to intercept the admin_add_org_conv definition
+    from app.bot import handlers as h
+    with patch.object(h, "ApplicationBuilder", _FakeBuilder):
+        with patch.object(h, "ConversationHandler", _FakeConversationHandler):
+            with patch.object(h, "MessageHandler", _FakeMessageHandler):
+                h.create_bot_application()
+
+    # Find our admin_add_org_conv instance
+    conv = next(c for c in created if c.name == "admin_add_org_conv")
+    email_state_handlers = conv.states[ADMIN_ADD_ORG_EMAIL]
+
+    expected = (filters.TEXT | filters.LOCATION) & ~filters.COMMAND
+    expected_repr = repr(expected)
+    assert any(repr(hh.filters) == expected_repr for hh in email_state_handlers)
+
+
+@pytest.mark.asyncio
+async def test_add_org_email_step_processes_location_and_stays_in_state():
+    ctx = make_context()
+    ctx.user_data["add_org"] = {
+        "step": "email",
+        "name": "Org Loc",
+        "org_type": "animal_shelter",
+        "awaiting_org_location": True,
+    }
+
+    class _Loc:
+        latitude = 32.071
+        longitude = 34.787
+
+    update = types.SimpleNamespace(message=MsgStub(location=_Loc()), effective_user=None, effective_chat=None)
+
+    # Mock reverse geocoding to avoid network
+    with patch("app.bot.handlers.geocoding_service.reverse_geocode", new=AsyncMock(return_value={
+        "address": "Some Address",
+        "city": "Tel Aviv"
+    })):
+        res = await handle_admin_add_org_email_input(update, ctx)
+
+    # Should remain in email state (prompt to enter email after saving location)
+    assert res == ADMIN_ADD_ORG_EMAIL
+    add_ctx = ctx.user_data["add_org"]
+    assert add_ctx.get("awaiting_org_location") is False
+    assert add_ctx.get("latitude") == pytest.approx(32.071)
+    assert add_ctx.get("longitude") == pytest.approx(34.787)
+    # A confirmation reply should be sent
+    assert update.message.calls

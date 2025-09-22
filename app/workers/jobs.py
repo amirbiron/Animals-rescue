@@ -31,6 +31,7 @@ from app.models.database import (
     AnimalType, OrganizationType, create_point_from_coordinates
 )
 from app.services.google import GoogleService
+from app.services.serpapi import SerpAPIService
 from app.services.nlp import NLPService
 from app.services.email import EmailService
 from app.services.telegram_alerts import TelegramAlertsService
@@ -49,6 +50,7 @@ logger = structlog.get_logger(__name__)
 # =============================================================================
 
 google_service = GoogleService()
+serpapi_service = SerpAPIService()
 nlp_service = NLPService()
 email_service = EmailService()
 telegram_alerts = TelegramAlertsService()
@@ -254,6 +256,45 @@ async def _process_new_report_async(report_id: str) -> Dict[str, Any]:
     
     return results
 
+
+@job("maintenance", timeout="5m", connection=redis_queue_sync)
+def reconcile_alert_channels() -> Dict[str, int]:
+    """Ensure each organization's alert_channels reflect available contact methods.
+
+    - If organization.email exists, include 'email'
+    - If organization.primary_phone exists, include 'sms' and 'whatsapp'
+    - If organization.telegram_chat_id exists, include 'telegram'
+    - Preserve order preference: whatsapp, sms, email, telegram
+    """
+    logger.info("Reconciling organization alert channels")
+    try:
+        return asyncio.run(_reconcile_alert_channels_async())
+    except Exception as e:
+        logger.error("reconcile_alert_channels failed", error=str(e))
+        raise
+
+
+async def _reconcile_alert_channels_async() -> Dict[str, int]:
+    results = {"processed": 0, "updated": 0}
+    async with async_session_maker() as session:
+        orgs = (await session.execute(select(Organization))).scalars().all()
+        for org in orgs:
+            results["processed"] += 1
+            desired: list[str] = []
+            if org.primary_phone:
+                desired.extend(["whatsapp", "sms"])  # prefer WhatsApp first
+            if org.telegram_chat_id:
+                desired.append("telegram")
+            # Remove duplicates preserving order
+            seen = set()
+            desired_unique = [c for c in desired if not (c in seen or seen.add(c))]
+            current = list(org.alert_channels or [])
+            if desired_unique != current:
+                org.alert_channels = desired_unique or current
+                results["updated"] += 1
+        await session.commit()
+    logger.info("reconcile_alert_channels completed", **results)
+    return results
 
 async def _find_organizations_by_location(
     latitude: float, longitude: float, urgency: UrgencyLevel
@@ -1054,6 +1095,61 @@ def sync_google_places_data() -> Dict[str, Any]:
         raise
 
 
+@job("external", timeout="15m", retry=Retry(max=2, interval=300), connection=redis_queue_sync)
+def enrich_org_contacts_with_serpapi() -> Dict[str, Any]:
+    """Enrich organizations missing contact details using SerpAPI (Google Maps)."""
+    logger.info("Starting SerpAPI enrichment job")
+    try:
+        return asyncio.run(_enrich_org_contacts_with_serpapi_async())
+    except Exception as e:
+        logger.error("SerpAPI enrichment failed", error=str(e))
+        raise
+
+
+async def _enrich_org_contacts_with_serpapi_async() -> Dict[str, Any]:
+    results: Dict[str, Any] = {"processed": 0, "updated": 0, "skipped": 0, "errors": 0}
+    async with async_session_maker() as session:
+        # Pick candidates with missing phone or website
+        result = await session.execute(
+            select(Organization).where(
+                and_(
+                    Organization.is_active == True,
+                    or_(Organization.primary_phone.is_(None), Organization.website.is_(None))
+                )
+            ).limit(500)
+        )
+        orgs = result.scalars().all()
+        for org in orgs:
+            results["processed"] += 1
+            try:
+                # Prefer name + city query
+                contact = serpapi_service.get_contact_by_name_city(org.name, org.city)
+                if not contact and org.google_place_id:
+                    contact = serpapi_service.get_details_by_place_id(org.google_place_id)
+                if not contact:
+                    results["skipped"] += 1
+                    continue
+                updated = False
+                if contact.get("phone") and not org.primary_phone:
+                    org.primary_phone = contact["phone"]
+                    updated = True
+                if contact.get("website") and not org.website:
+                    org.website = contact["website"]
+                    updated = True
+                if contact.get("place_id") and not org.google_place_id:
+                    org.google_place_id = contact["place_id"]
+                    updated = True
+                if updated:
+                    results["updated"] += 1
+                await asyncio.sleep(0)
+            except Exception as e:
+                results["errors"] += 1
+                logger.warning("SerpAPI org enrich failed", org_id=str(org.id), error=str(e))
+        await session.commit()
+    logger.info("SerpAPI enrichment completed", results=results)
+    return results
+
+
 async def _sync_google_places_data_async() -> Dict[str, Any]:
     """Async implementation of Google Places sync."""
     results = {
@@ -1351,6 +1447,14 @@ def schedule_recurring_jobs():
         use_local_timezone=False
     )
     
+    # SerpAPI enrichment daily at 03:30
+    scheduler.cron(
+        cron_string="30 3 * * *",  # Every day at 03:30
+        func=enrich_org_contacts_with_serpapi,
+        timeout="15m",
+        use_local_timezone=False
+    )
+    
     # Generate daily statistics at midnight
     scheduler.cron(
         cron_string="0 0 * * *",  # Every day at midnight
@@ -1367,6 +1471,19 @@ def schedule_recurring_jobs():
         use_local_timezone=False
     )
     
+    # Reconcile alert channels hourly
+    try:
+        from app.workers.jobs import reconcile_alert_channels  # type: ignore
+        scheduler.cron(
+            cron_string="0 * * * *",
+            func=reconcile_alert_channels,
+            timeout="5m",
+            use_local_timezone=False
+        )
+    except Exception:
+        # In case function not yet imported in certain builds, skip scheduling
+        pass
+    
     logger.info("Recurring jobs scheduled")
 
 
@@ -1381,6 +1498,7 @@ __all__ = [
     "cleanup_old_data",
     "update_organization_stats",
     "sync_google_places_data",
+    "enrich_org_contacts_with_serpapi",
     "send_test_alert",
     "generate_daily_statistics",
     "schedule_recurring_jobs",

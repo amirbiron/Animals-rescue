@@ -1137,6 +1137,8 @@ class GeocodingService:
     
     def __init__(self):
         self.google_service = GoogleService()
+        # Simple in-memory cache for reverse geocoding
+        self._rev_cache: Dict[str, Dict[str, Any]] = {}
     
     async def geocode(self, address: str, language: str = "he") -> Optional[Dict[str, Any]]:
         """Geocode an address to coordinates."""
@@ -1149,9 +1151,57 @@ class GeocodingService:
         longitude: float, 
         language: str = "he"
     ) -> Optional[Dict[str, Any]]:
-        """Reverse geocode coordinates to address."""
+        """Reverse geocode coordinates to address.
+        Tries Google first, then falls back to Nominatim if missing city/address.
+        Caches successful lookups in-memory.
+        """
+        key = f"{round(latitude, 6)}:{round(longitude, 6)}:{language}"
+        if key in self._rev_cache:
+            return self._rev_cache[key]
+        result: Optional[Dict[str, Any]] = None
         async with self.google_service:
-            return await self.google_service.reverse_geocode(latitude, longitude, language)
+            try:
+                result = await self.google_service.reverse_geocode(latitude, longitude, language)
+            except Exception:
+                result = None
+        # If Google failed or city/address missing, fallback to Nominatim
+        needs_fallback = (
+            not result or not (result.get("city") or result.get("address") or result.get("formatted_address"))
+        )
+        if needs_fallback:
+            try:
+                async with httpx.AsyncClient(timeout=5) as client:
+                    resp = await client.get(
+                        "https://nominatim.openstreetmap.org/reverse",
+                        params={
+                            "lat": latitude,
+                            "lon": longitude,
+                            "format": "jsonv2",
+                            "accept-language": language,
+                        },
+                        headers={"User-Agent": f"{settings.APP_NAME}/{settings.APP_VERSION}"}
+                    )
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        address = data.get("display_name")
+                        components = data.get("address", {})
+                        city = components.get("city") or components.get("town") or components.get("village") or components.get("municipality")
+                        fallback = {
+                            "address": address,
+                            "formatted_address": address,
+                            "city": city,
+                            "components": components,
+                        }
+                        # If Google had partial, merge
+                        if result:
+                            result.update({k: v for k, v in fallback.items() if v})
+                        else:
+                            result = fallback
+            except Exception as e:
+                logger.warning("Nominatim reverse geocode failed", error=str(e))
+        if result:
+            self._rev_cache[key] = result
+        return result
     
     async def batch_geocode(
         self, 
