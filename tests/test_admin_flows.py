@@ -6,6 +6,7 @@ from app.bot.handlers import (
     ADMIN_ADD_ORG_NAME,
     ADMIN_ADD_ORG_TYPE,
     ADMIN_ADD_ORG_LOCATION,
+    ADMIN_ADD_ORG_PHONE,
     ADMIN_ADD_ORG_EMAIL,
     ADMIN_IMPORT_GOOGLE_CITY,
     ADMIN_IMPORT_LOCATION_INPUT,
@@ -17,6 +18,7 @@ from app.bot.handlers import (
     handle_admin_add_org_name_input,
     handle_admin_add_org_type,
     handle_admin_add_org_location_input,
+    handle_admin_add_org_phone_input,
     handle_admin_add_org_email_input,
     show_admin_orgs_menu,
     show_org_statistics,
@@ -227,8 +229,8 @@ async def test_add_org_happy_path():
     cq2 = CqStub(data="admin_add_org_type_animal_shelter")
     update_cq2 = types.SimpleNamespace(callback_query=cq2, effective_user=None, effective_chat=None)
     state = await handle_admin_add_org_type(update_cq2, ctx)
-    assert state == ADMIN_ADD_ORG_EMAIL
-    assert ctx.user_data["add_org"]["step"] == "email"
+    assert state == ADMIN_ADD_ORG_PHONE
+    assert ctx.user_data["add_org"]["step"] == "phone"
 
     # Send location (typed address), then email and commit
     class _FakeSession:
@@ -246,7 +248,13 @@ async def test_add_org_happy_path():
         "longitude": 34.887,
         "city": "תל אביב-יפו",
     })):
-        # Provide typed address
+        # Provide typed address (should keep in email later, but now we are in phone step; so first move to email)
+        # Move to phone -> email
+        ctx.user_data["add_org"]["step"] = "phone"
+        phone_msg = MsgStub(text="050-1234567")
+        _ = await handle_admin_add_org_phone_input(types.SimpleNamespace(message=phone_msg, effective_user=None, effective_chat=None), ctx)
+        assert ctx.user_data["add_org"]["step"] == "email"
+        # Now location typed should keep us in email
         loc_msg = MsgStub(text="רחוב דוגמה 1, תל אביב")
         update_loc = types.SimpleNamespace(message=loc_msg, effective_user=None, effective_chat=None)
         next_state = await handle_admin_add_org_location_input(update_loc, ctx)
@@ -520,9 +528,9 @@ async def test_admin_add_org_type_moves_to_email_and_sends_instructions_i18n():
     cq = CqStub(data="admin_add_org_type_animal_shelter")
     update = types.SimpleNamespace(callback_query=cq, effective_user=None, effective_chat=None)
     res = await handle_admin_add_org_type(update, ctx)
-    assert res == ADMIN_ADD_ORG_EMAIL
-    # Moved to email step and edited message with email instructions
-    assert ctx.user_data["add_org"]["step"] == "email"
+    assert res == ADMIN_ADD_ORG_PHONE
+    # Moved to phone step and prompted phone instructions
+    assert ctx.user_data["add_org"]["step"] == "phone"
 
 
 @pytest.mark.asyncio
@@ -562,7 +570,8 @@ async def test_add_org_empty_name_stays_in_state():
 @pytest.mark.asyncio
 async def test_add_org_email_creates_object_with_fields():
     ctx = make_context()
-    ctx.user_data["add_org"] = {"step": "email", "name": "Org Y", "org_type": "animal_shelter"}
+    # New flow requires phone before email
+    ctx.user_data["add_org"] = {"step": "phone", "name": "Org Y", "org_type": "animal_shelter"}
 
     class _FakeSession:
         def __init__(self):
@@ -578,8 +587,18 @@ async def test_add_org_email_creates_object_with_fields():
 
     session = _FakeSession()
     with patch("app.bot.handlers.async_session_maker", return_value=session):
+        # Provide phone first
+        msg_phone = MsgStub(text="03-5555555")
+        _ = await handle_admin_add_org_phone_input(types.SimpleNamespace(message=msg_phone, effective_user=None, effective_chat=None), ctx)
+        # Then provide email
         msg = MsgStub(text="orgy@example.com")
-        end = await handle_admin_add_org_email_input(types.SimpleNamespace(message=msg, effective_user=None, effective_chat=None), ctx)
+        # After email, flow moves to location step, so not END yet
+        state = await handle_admin_add_org_email_input(types.SimpleNamespace(message=msg, effective_user=None, effective_chat=None), ctx)
+        assert state == ADMIN_ADD_ORG_LOCATION
+        # Now skip location to finalize
+        from app.bot.handlers import handle_admin_add_org_location_input as _loc_handler
+        skip_msg = MsgStub(text="דלג")
+        end = await _loc_handler(types.SimpleNamespace(message=skip_msg, effective_user=None, effective_chat=None), ctx)
         assert end == ConversationHandler.END
         assert session.added and session.added[0].name == "Org Y"
         assert session.added[0].email == "orgy@example.com"
@@ -696,6 +715,7 @@ def test_admin_add_org_location_and_email_filters_mapping():
 @pytest.mark.asyncio
 async def test_add_org_email_step_processes_location_and_stays_in_state():
     ctx = make_context()
+    # In new flow, email step ignores location; we simulate being in email and verify we move to location after email.
     ctx.user_data["add_org"] = {
         "step": "email",
         "name": "Org Loc",
@@ -716,11 +736,9 @@ async def test_add_org_email_step_processes_location_and_stays_in_state():
     })):
         res = await handle_admin_add_org_email_input(update, ctx)
 
-    # Should remain in email state (prompt to enter email after saving location)
+    # In new flow, email step ignores location and stays in email
     assert res == ADMIN_ADD_ORG_EMAIL
     add_ctx = ctx.user_data["add_org"]
-    assert add_ctx.get("awaiting_org_location") is False
-    assert add_ctx.get("latitude") == pytest.approx(32.071)
-    assert add_ctx.get("longitude") == pytest.approx(34.787)
-    # A confirmation reply should be sent
-    assert update.message.calls
+    # awaiting_org_location flag is not modified at email step now
+    assert add_ctx.get("latitude") is None
+    assert add_ctx.get("longitude") is None
