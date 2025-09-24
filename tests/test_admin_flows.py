@@ -227,8 +227,8 @@ async def test_add_org_happy_path():
     cq2 = CqStub(data="admin_add_org_type_animal_shelter")
     update_cq2 = types.SimpleNamespace(callback_query=cq2, effective_user=None, effective_chat=None)
     state = await handle_admin_add_org_type(update_cq2, ctx)
-    assert state == ADMIN_ADD_ORG_LOCATION
-    assert ctx.user_data["add_org"]["step"] == "location"
+    assert state == ADMIN_ADD_ORG_EMAIL
+    assert ctx.user_data["add_org"]["step"] == "email"
 
     # Send location (typed address), then email and commit
     class _FakeSession:
@@ -514,17 +514,15 @@ async def test_import_google_city_dedup():
 
 
 @pytest.mark.asyncio
-async def test_admin_add_org_type_moves_to_location_and_sends_instructions_i18n():
+async def test_admin_add_org_type_moves_to_email_and_sends_instructions_i18n():
     ctx = make_context()
     ctx.user_data["add_org"] = {"step": "type", "name": "Org Z"}
     cq = CqStub(data="admin_add_org_type_animal_shelter")
     update = types.SimpleNamespace(callback_query=cq, effective_user=None, effective_chat=None)
     res = await handle_admin_add_org_type(update, ctx)
-    assert res == ADMIN_ADD_ORG_LOCATION
-    # Message edited with location instructions
-    # Either edited or replied text will include request_location_instructions
-    # Since we cannot easily assert both, check that state moved and step flagged
-    assert ctx.user_data["add_org"]["step"] == "location"
+    assert res == ADMIN_ADD_ORG_EMAIL
+    # Moved to email step and edited message with email instructions
+    assert ctx.user_data["add_org"]["step"] == "email"
 
 
 @pytest.mark.asyncio
@@ -696,12 +694,13 @@ def test_admin_add_org_location_and_email_filters_mapping():
 
 
 @pytest.mark.asyncio
-async def test_add_org_location_step_processes_location_and_moves_to_email():
+async def test_add_org_email_step_processes_location_and_stays_in_state():
     ctx = make_context()
     ctx.user_data["add_org"] = {
-        "step": "location",
+        "step": "email",
         "name": "Org Loc",
         "org_type": "animal_shelter",
+        "awaiting_org_location": True,
     }
 
     class _Loc:
@@ -715,12 +714,12 @@ async def test_add_org_location_step_processes_location_and_moves_to_email():
         "address": "Some Address",
         "city": "Tel Aviv"
     })):
-        res = await handle_admin_add_org_location_input(update, ctx)
+        res = await handle_admin_add_org_email_input(update, ctx)
 
-    # Should move to email state (prompt to enter email after saving location)
+    # Should remain in email state (prompt to enter email after saving location)
     assert res == ADMIN_ADD_ORG_EMAIL
     add_ctx = ctx.user_data["add_org"]
-    assert add_ctx.get("step") == "email"
+    assert add_ctx.get("awaiting_org_location") is False
     assert add_ctx.get("latitude") == pytest.approx(32.071)
     assert add_ctx.get("longitude") == pytest.approx(34.787)
     # A confirmation reply should be sent
