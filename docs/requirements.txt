@@ -1,5 +1,6 @@
 # MkDocs and plugins for documentation
-mkdocs==1.6.0
+# Align mkdocs version with mkdocs-material 9.5.x compatibility (~=1.5)
+mkdocs~=1.5
 mkdocs-material==9.5.18
 mkdocs-minify-plugin==0.8.0
 mkdocs-mermaid2-plugin==1.1.1
