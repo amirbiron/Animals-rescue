@@ -1,3 +1,50 @@
+name: Docs
+
+on:
+  pull_request:
+    paths:
+      - 'mkdocs.yml'
+      - 'docs/**'
+      - '.github/workflows/docs.yml'
+  push:
+    branches: [ main ]
+    paths:
+      - 'mkdocs.yml'
+      - 'docs/**'
+      - '.github/workflows/docs.yml'
+  workflow_dispatch:
+
+jobs:
+  build-docs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install MkDocs dependencies
+        run: |
+          if [ -f docs/requirements.txt ]; then
+            pip install -r docs/requirements.txt
+          else
+            pip install mkdocs mkdocs-material mkdocs-minify-plugin
+          fi
+
+      - name: Build documentation
+        run: mkdocs build --strict --clean
+
+      - name: Upload built site as artifact (PR preview)
+        if: ${{ github.event_name == 'pull_request' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: mkdocs-site
+          path: site
+
 name: Deploy Documentation
 
 on:
