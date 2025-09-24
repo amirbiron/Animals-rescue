@@ -3164,13 +3164,6 @@ async def handle_admin_add_org_type(update: Update, context: ContextTypes.DEFAUL
         await query.edit_message_text(get_text("email_instructions", lang), reply_markup=email_actions_kb)
     except Exception:
         await query.edit_message_text(get_text("email_instructions", lang))
-    # בקשו מיקום עם מקלדת שיתוף מיקום ו"דלג"
-    try:
-        keyboard = [[KeyboardButton(get_text("share_location", lang), request_location=True)], [KeyboardButton(get_text("skip", lang))]]
-        await query.message.reply_text(get_text("org_request_location", lang), reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True))
-    except Exception:
-        # לא נכשלים אם אין message זמין
-        pass
     logger.info("enter state=email", flow="admin_add_org")
     return ADMIN_ADD_ORG_EMAIL
 
