@@ -7,6 +7,7 @@ asynchronous task processing in the Animal Rescue Bot system.
 """
 
 import asyncio
+import os
 import json
 import smtplib
 import uuid
@@ -1473,11 +1474,12 @@ def schedule_recurring_jobs():
         use_local_timezone=False
     )
     
-    # Reconcile alert channels hourly
+    # Reconcile alert channels (configurable via RECONCILE_ALERT_CHANNELS_CRON, default hourly)
     try:
         from app.workers.jobs import reconcile_alert_channels  # type: ignore
+        cron_expr = os.getenv("RECONCILE_ALERT_CHANNELS_CRON", "0 * * * *")
         scheduler.cron(
-            cron_string="0 * * * *",
+            cron_string=cron_expr,
             func=reconcile_alert_channels,
             timeout="5m",
             use_local_timezone=False
