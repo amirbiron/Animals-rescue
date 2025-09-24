@@ -16,6 +16,8 @@ from typing import Dict, List, Optional, Any, Callable
 import multiprocessing as mp
 from pathlib import Path
 import psutil
+import os
+import uuid as _uuid
 
 import redis
 import structlog
@@ -126,10 +128,13 @@ class ManagedWorker:
         
         try:
             # Create RQ Worker
+            # Use a unique RQ worker name to avoid collisions on restarts
+            unique_suffix = f"{os.getpid()}-{_uuid.uuid4().hex[:6]}"
+            rq_worker_name = f"{self.worker_id}-{unique_suffix}"
             self.worker = Worker(
                 queues=self.queues,
                 connection=self.connection,
-                name=self.worker_id,
+                name=rq_worker_name,
                 default_worker_ttl=WORKER_TIMEOUT
             )
             
@@ -472,6 +477,9 @@ class WorkerManager:
         try:
             current_time = datetime.utcnow()
             unhealthy_workers = []
+            # Grace period on startup: skip aggressive checks for initial heartbeats
+            uptime_seconds = (current_time - self.start_time).total_seconds()
+            in_grace_period = uptime_seconds < (HEARTBEAT_INTERVAL * 2)
             
             for worker_id, process in self.worker_processes.items():
                 # Check if process is alive
@@ -485,6 +493,9 @@ class WorkerManager:
                 try:
                     heartbeat_data = redis_queue_sync.get(heartbeat_key)
                     if not heartbeat_data:
+                        if in_grace_period and process.is_alive():
+                            # Allow some time for first heartbeat after startup
+                            continue
                         logger.warning(f"No heartbeat from worker {worker_id}")
                         unhealthy_workers.append(worker_id)
                 except Exception as e:
