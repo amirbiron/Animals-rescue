@@ -69,8 +69,9 @@ from app.core.i18n import get_text, detect_language, set_user_language, get_user
     ADMIN_ADD_ORG_NAME,
     ADMIN_ADD_ORG_TYPE,
     ADMIN_ADD_ORG_LOCATION,
+    ADMIN_ADD_ORG_PHONE,
     ADMIN_ADD_ORG_EMAIL,
-) = range(100, 104)
+) = range(100, 105)
 
 # Admin: Import flows conversation states
 (
@@ -3034,6 +3035,10 @@ async def handle_admin_add_org_email_input(update: Update, context: ContextTypes
     if not (add_ctx.get("address") or (add_ctx.get("latitude") is not None and add_ctx.get("longitude") is not None)):
         await update.message.reply_text(get_text("org_address_required", lang))
         return ADMIN_ADD_ORG_LOCATION
+    # Require phone before creation
+    if not add_ctx.get("primary_phone"):
+        await update.message.reply_text(get_text("org_phone_required", lang))
+        return ADMIN_ADD_ORG_PHONE
     latitude = add_ctx.get("latitude")
     longitude = add_ctx.get("longitude")
     city = add_ctx.get("city")
@@ -3146,21 +3151,12 @@ async def handle_admin_add_org_location_input(update: Update, context: ContextTy
             await update.message.reply_text(get_text("error_location", lang), reply_markup=ReplyKeyboardRemove())
             return ADMIN_ADD_ORG_LOCATION
 
-        # Proceed to email step
-        try:
-            email_actions_kb = InlineKeyboardMarkup(
-                [[
-                    InlineKeyboardButton(get_text("update_phone", lang), callback_data="admin_add_org_add_phone"),
-                    InlineKeyboardButton(get_text("skip", lang), callback_data="admin_add_org_skip_email")
-                ]]
-            )
-            await update.message.reply_text(get_text("email_instructions", lang), reply_markup=email_actions_kb)
-        except Exception:
-            await update.message.reply_text(get_text("email_instructions", lang))
-        add_ctx["step"] = "email"
+        # Proceed to phone step
+        add_ctx["step"] = "phone"
         context.user_data["add_org"] = add_ctx
-        logger.info("enter state=email", flow="admin_add_org")
-        return ADMIN_ADD_ORG_EMAIL
+        await update.message.reply_text(get_text("phone_instructions", lang))
+        logger.info("enter state=phone", flow="admin_add_org")
+        return ADMIN_ADD_ORG_PHONE
 
     # Handle typed address
     if getattr(update, 'message', None) and update.message.text:
@@ -3187,22 +3183,12 @@ async def handle_admin_add_org_location_input(update: Update, context: ContextTy
             except Exception:
                 pass
 
-            # Proceed to email step
-            try:
-                email_actions_kb = InlineKeyboardMarkup(
-                    [[
-                        InlineKeyboardButton(get_text("update_phone", lang), callback_data="admin_add_org_add_phone"),
-                        InlineKeyboardButton(get_text("skip", lang), callback_data="admin_add_org_skip_email")
-                    ]]
-                )
-                await update.message.reply_text(get_text("email_instructions", lang), reply_markup=email_actions_kb)
-            except Exception:
-                await update.message.reply_text(get_text("email_instructions", lang))
-
-            add_ctx["step"] = "email"
+            # Proceed to phone step
+            add_ctx["step"] = "phone"
             context.user_data["add_org"] = add_ctx
-            logger.info("enter state=email", flow="admin_add_org")
-            return ADMIN_ADD_ORG_EMAIL
+            await update.message.reply_text(get_text("phone_instructions", lang))
+            logger.info("enter state=phone", flow="admin_add_org")
+            return ADMIN_ADD_ORG_PHONE
 
         await update.message.reply_text(get_text("address_not_found", lang))
         return ADMIN_ADD_ORG_LOCATION
@@ -3232,7 +3218,6 @@ async def handle_admin_add_org_skip_email(update: Update, context: ContextTypes.
         async with async_session_maker() as session:
             # Determine alert channels dynamically
             channels: List[str] = []
-            # If phone available (from enrichment later), sms/whatsapp can be appended in maintenance jobs.
             # For creation-without-email, do not default to telegram unless chat id exists.
             org = Organization(
                 name=name,
@@ -3246,6 +3231,8 @@ async def handle_admin_add_org_skip_email(update: Update, context: ContextTypes.
                 city=city,
                 address=address,
             )
+            if add_ctx.get("primary_phone"):
+                org.primary_phone = add_ctx["primary_phone"]
             if latitude and longitude:
                 try:
                     org.location = create_point_from_coordinates(latitude, longitude)
@@ -3272,7 +3259,48 @@ async def handle_admin_add_org_add_phone(update: Update, context: ContextTypes.D
     lang = get_user_language(context)
     context.user_data["add_org"]["awaiting_org_phone"] = True
     await query.edit_message_text(get_text("phone_instructions", lang))
-    return ADMIN_ADD_ORG_EMAIL if step == "email" else ADMIN_ADD_ORG_LOCATION
+    return ADMIN_ADD_ORG_PHONE if step == "phone" else (ADMIN_ADD_ORG_EMAIL if step == "email" else ADMIN_ADD_ORG_LOCATION)
+
+
+async def handle_admin_add_org_phone_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Collect mandatory organization phone, validate/normalize, then proceed to email step."""
+    logger.info(
+        "enter_handle_admin_add_org_phone_input",
+        in_flow=bool(context.user_data.get("add_org")),
+        step=(context.user_data.get("add_org", {}).get("step") if context.user_data.get("add_org") else None),
+        text=(getattr(update, 'message', None) and getattr(update.message, 'text', None)),
+    )
+    if not context.user_data.get("add_org") or context.user_data.get("add_org", {}).get("step") != "phone":
+        return ADMIN_ADD_ORG_PHONE
+    lang = get_user_language(context)
+    add_ctx = context.user_data.get("add_org", {})
+    text = (getattr(update, 'message', None) and update.message.text or '').strip()
+    normalized = text
+    if normalized.startswith("00") and "+" not in normalized:
+        normalized = "+" + normalized[2:]
+    if normalized.startswith("0") and not normalized.startswith("+"):
+        normalized = "+972" + normalized[1:]
+    import re as _re_phone
+    if not _re_phone.match(r"^\+?\d[\d\-\s]{6,}$", normalized):
+        await update.message.reply_text(get_text("invalid_phone", lang))
+        await update.message.reply_text(get_text("phone_instructions", lang))
+        return ADMIN_ADD_ORG_PHONE
+    add_ctx["primary_phone"] = normalized
+    add_ctx["step"] = "email"
+    context.user_data["add_org"] = add_ctx
+    try:
+        email_actions_kb = InlineKeyboardMarkup(
+            [[
+                InlineKeyboardButton(get_text("update_phone", lang), callback_data="admin_add_org_add_phone"),
+                InlineKeyboardButton(get_text("skip", lang), callback_data="admin_add_org_skip_email")
+            ]]
+        )
+        await update.message.reply_text(get_text("phone_updated", lang).format(phone=normalized))
+        await update.message.reply_text(get_text("email_instructions", lang), reply_markup=email_actions_kb)
+    except Exception:
+        await update.message.reply_text(get_text("email_instructions", lang))
+    logger.info("enter state=email", flow="admin_add_org")
+    return ADMIN_ADD_ORG_EMAIL
 
 async def handle_admin_org_performance(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
@@ -3843,6 +3871,9 @@ def create_bot_application() -> Application:
             ADMIN_ADD_ORG_LOCATION: [
                 MessageHandler((filters.TEXT | filters.LOCATION) & ~filters.COMMAND, handle_admin_add_org_location_input),
                 CallbackQueryHandler(handle_admin_add_org_add_phone, pattern="^admin_add_org_add_phone$")
+            ],
+            ADMIN_ADD_ORG_PHONE: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_admin_add_org_phone_input),
             ],
             ADMIN_ADD_ORG_EMAIL: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_admin_add_org_email_input),

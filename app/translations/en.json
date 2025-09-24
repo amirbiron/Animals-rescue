@@ -25,6 +25,7 @@
   "share_location": "Share location",
   "skip": "Skip",
   "org_address_required": "Address/location is required to add an organization. Share GPS or type address.",
+  "org_phone_required": "Phone number is required to add an organization. Enter a valid number.",
   "enter_address_manually": "Enter address manually",
   "address_unavailable": "Address unavailable (coordinates only)",
   "address_not_found": "We couldn't find this address.",

@@ -148,6 +148,7 @@
   "email_updated": "כתובת האימייל עודכנה ל‑{email} ✅",
   "invalid_phone": "מספר טלפון לא תקין",
   "invalid_email": "כתובת אימייל לא תקינה",
+  "org_phone_required": "מספר טלפון חובה כדי להוסיף ארגון. הכנס מספר תקין.",
   
   "org_reports_assigned": "📥 דיווחים שהוקצו לי",
   "org_acknowledge_report": "✅ אישור קבלת דיווח",
