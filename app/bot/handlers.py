@@ -3016,7 +3016,7 @@ async def handle_admin_add_org_email_input(update: Update, context: ContextTypes
 
     # No skip handling for location at email step
 
-    # Email capture and organization creation
+    # Email capture and proceed to location stage
     import re as _re
     if not _re.match(r"^[^\s@]+@[^\s@]+\.[^\s@]+$", text):
         # שלבו הודעת שגיאה עם ההוראות כהודעה אחת כדי להבטיח שהטסט מצפה ל"כתובת אימייל לא תקינה" בהודעה האחרונה
@@ -3065,21 +3065,14 @@ async def handle_admin_add_org_type(update: Update, context: ContextTypes.DEFAUL
     if not name:
         await query.edit_message_text(get_text("operation_failed", lang))
         return ADMIN_ADD_ORG_TYPE
-    # Move to email collection step; במקביל, בקשו מיקום (אופציונלי) להכוונת התראות
-    context.user_data["add_org"] = {"step": "email", "name": name, "org_type": org_type, "awaiting_org_location": True}
-    # שמרו טקסט אימייל כדי לא לשבור טסטים קיימים (עריכת ההודעה)
+    # Move to mandatory phone collection step
+    context.user_data["add_org"] = {"step": "phone", "name": name, "org_type": org_type}
     try:
-        email_actions_kb = InlineKeyboardMarkup(
-            [[
-                InlineKeyboardButton(get_text("update_phone", lang), callback_data="admin_add_org_add_phone"),
-                InlineKeyboardButton(get_text("skip", lang), callback_data="admin_add_org_skip_email")
-            ]]
-        )
-        await query.edit_message_text(get_text("email_instructions", lang), reply_markup=email_actions_kb)
+        await query.edit_message_text(get_text("phone_instructions", lang))
     except Exception:
-        await query.edit_message_text(get_text("email_instructions", lang))
-    logger.info("enter state=email", flow="admin_add_org")
-    return ADMIN_ADD_ORG_EMAIL
+        await query.edit_message_text(get_text("phone_instructions", lang))
+    logger.info("enter state=phone", flow="admin_add_org")
+    return ADMIN_ADD_ORG_PHONE
 
 
 async def handle_admin_add_org_location_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -3323,6 +3316,15 @@ async def handle_admin_add_org_skip_email(update: Update, context: ContextTypes.
     add_ctx = context.user_data.get("add_org", {})
     name = add_ctx.get("name")
     org_type = add_ctx.get("org_type")
+    # Enforce phone as mandatory before skipping email
+    if not add_ctx.get("primary_phone"):
+        await query.edit_message_text(get_text("org_phone_required", lang))
+        context.user_data["add_org"]["step"] = "phone"
+        try:
+            await query.message.reply_text(get_text("phone_instructions", lang))
+        except Exception:
+            pass
+        return ADMIN_ADD_ORG_PHONE
     # Enforce required address/location before allowing skip-email creation
     if not (add_ctx.get("address") or (add_ctx.get("latitude") is not None and add_ctx.get("longitude") is not None)):
         await query.edit_message_text(get_text("org_address_required", lang))
@@ -3403,17 +3405,12 @@ async def handle_admin_add_org_phone_input(update: Update, context: ContextTypes
         await update.message.reply_text(get_text("phone_instructions", lang))
         return ADMIN_ADD_ORG_PHONE
     add_ctx["primary_phone"] = normalized
+    # Move to email stage next
     add_ctx["step"] = "email"
     context.user_data["add_org"] = add_ctx
     try:
-        email_actions_kb = InlineKeyboardMarkup(
-            [[
-                InlineKeyboardButton(get_text("update_phone", lang), callback_data="admin_add_org_add_phone"),
-                InlineKeyboardButton(get_text("skip", lang), callback_data="admin_add_org_skip_email")
-            ]]
-        )
         await update.message.reply_text(get_text("phone_updated", lang).format(phone=normalized))
-        await update.message.reply_text(get_text("email_instructions", lang), reply_markup=email_actions_kb)
+        await update.message.reply_text(get_text("email_instructions", lang))
     except Exception:
         await update.message.reply_text(get_text("email_instructions", lang))
     logger.info("enter state=email", flow="admin_add_org")
