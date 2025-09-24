@@ -2983,51 +2983,7 @@ async def handle_admin_add_org_email_input(update: Update, context: ContextTypes
     lang = get_user_language(context)
     add_ctx = context.user_data.get("add_org", {})
 
-    # First: optional location capture while in email step
-    if getattr(update, 'message', None) and getattr(update.message, 'location', None) and add_ctx.get("awaiting_org_location"):
-        loc = update.message.location
-        try:
-            # Save coordinates immediately
-            add_ctx["latitude"] = float(getattr(loc, 'latitude', None) or 0)
-            add_ctx["longitude"] = float(getattr(loc, 'longitude', None) or 0)
-            # Reverse geocode for city/address (best-effort)
-            try:
-                details = await geocoding_service.reverse_geocode(add_ctx["latitude"], add_ctx["longitude"], language=lang)
-            except Exception:
-                details = None
-            if details:
-                add_ctx["address"] = details.get("address") or details.get("formatted_address")
-                add_ctx["city"] = details.get("city") or details.get("components", {}).get("city")
-                await update.message.reply_text(
-                    get_text("org_location_saved", lang).format(
-                        address=add_ctx.get("address") or get_text("coordinates_only", lang),
-                        city=add_ctx.get("city") or get_text("unknown_city", lang),
-                    ),
-                    reply_markup=ReplyKeyboardRemove(),
-                )
-            else:
-                await update.message.reply_text(
-                    get_text("org_location_saved", lang).format(
-                        address=get_text("coordinates_only", lang),
-                        city=get_text("unknown_city", lang),
-                    ),
-                    reply_markup=ReplyKeyboardRemove(),
-                )
-        finally:
-            add_ctx["awaiting_org_location"] = False
-            context.user_data["add_org"] = add_ctx
-        # Prompt for email again (with inline skip)
-        try:
-            email_actions_kb = InlineKeyboardMarkup(
-                [[
-                    InlineKeyboardButton(get_text("update_phone", lang), callback_data="admin_add_org_add_phone"),
-                    InlineKeyboardButton(get_text("skip", lang), callback_data="admin_add_org_skip_email")
-                ]]
-            )
-            await update.message.reply_text(get_text("email_instructions", lang), reply_markup=email_actions_kb)
-        except Exception:
-            await update.message.reply_text(get_text("email_instructions", lang))
-        return ADMIN_ADD_ORG_EMAIL
+    # Location will be handled in a dedicated step; ignore location updates here
 
     text = (getattr(update, 'message', None) and update.message.text or '').strip()
     # Capture phone if requested during email step
@@ -3058,19 +3014,7 @@ async def handle_admin_add_org_email_input(update: Update, context: ContextTypes
             await update.message.reply_text(get_text("email_instructions", lang))
         return ADMIN_ADD_ORG_EMAIL
 
-    # Allow skipping location by text
-    text = (getattr(update, 'message', None) and update.message.text or '').strip()
-    if add_ctx.get("awaiting_org_location") and text:
-        skip_words = {"דלג", "skip"}
-        try:
-            skip_words.add(get_text("skip", lang))
-        except Exception:
-            pass
-        if text.lower() in {w.lower() for w in skip_words}:
-            add_ctx["awaiting_org_location"] = False
-            context.user_data["add_org"] = add_ctx
-            await update.message.reply_text(get_text("email_instructions", lang), reply_markup=ReplyKeyboardRemove())
-            return ADMIN_ADD_ORG_EMAIL
+    # No skip handling for location at email step
 
     # Email capture and organization creation
     import re as _re
@@ -3089,46 +3033,16 @@ async def handle_admin_add_org_email_input(update: Update, context: ContextTypes
             await update.message.reply_text(combined)
         return ADMIN_ADD_ORG_EMAIL
     logger.info("add_org_email_captured")
-    name = add_ctx.get("name")
-    org_type = add_ctx.get("org_type")
-    # Proceed even if address/phone are missing (תאימות לאחור)
-    latitude = add_ctx.get("latitude")
-    longitude = add_ctx.get("longitude")
-    city = add_ctx.get("city")
-    address = add_ctx.get("address")
-    async with async_session_maker() as session:
-        # Determine alert channels dynamically
-        channels: List[str] = []
-        if text:
-            channels.append("email")
-        if add_ctx.get("latitude") is not None or add_ctx.get("longitude") is not None:
-            # Location doesn't imply channel; keep for future logic
-            pass
-        # Prefer telegram for now only if chat id set later by admin; not at creation
-        org = Organization(
-            name=name,
-            organization_type=OrganizationType(org_type),
-            email=text,
-            alert_channels=[],
-            is_active=True,
-            is_verified=True,
-            latitude=latitude if latitude else None,
-            longitude=longitude if longitude else None,
-            city=city,
-            address=address,
-        )
-        if add_ctx.get("primary_phone"):
-            org.primary_phone = add_ctx["primary_phone"]
-        if latitude and longitude:
-            try:
-                org.location = create_point_from_coordinates(latitude, longitude)
-            except Exception:
-                pass
-        session.add(org)
-        await session.commit()
-    context.user_data.pop("add_org", None)
-    await update.message.reply_text(get_text("org_approved", lang).format(name=name), reply_markup=ReplyKeyboardRemove())
-    return ConversationHandler.END
+    # Store email and move to location step (optional)
+    add_ctx["email"] = text
+    add_ctx["step"] = "location"
+    context.user_data["add_org"] = add_ctx
+    try:
+        keyboard = [[KeyboardButton(get_text("share_location", lang), request_location=True)], [KeyboardButton(get_text("skip", lang))]]
+        await update.message.reply_text(get_text("org_request_location", lang), reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True))
+    except Exception:
+        pass
+    return ADMIN_ADD_ORG_LOCATION
 
 
 async def handle_admin_add_org_type(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -3181,6 +3095,61 @@ async def handle_admin_add_org_location_input(update: Update, context: ContextTy
     lang = get_user_language(context)
     add_ctx = context.user_data.get("add_org", {})
 
+    # Allow skipping location by text button
+    if getattr(update, 'message', None) and getattr(update.message, 'text', None):
+        text = (update.message.text or '').strip()
+        if text:
+            skip_words = {"דלג", "skip"}
+            try:
+                skip_words.add(get_text("skip", lang))
+            except Exception:
+                pass
+            if text.lower() in {w.lower() for w in skip_words}:
+                # If email already exists, finalize without location
+                if context.user_data.get("add_org", {}).get("email"):
+                    add_ctx = context.user_data.get("add_org", {})
+                    name = add_ctx.get("name")
+                    org_type = add_ctx.get("org_type")
+                    try:
+                        async with async_session_maker() as session:
+                            org = Organization(
+                                name=name,
+                                organization_type=OrganizationType(org_type),
+                                email=add_ctx.get("email"),
+                                alert_channels=[],
+                                is_active=True,
+                                is_verified=True,
+                                latitude=None,
+                                longitude=None,
+                                city=add_ctx.get("city"),
+                                address=add_ctx.get("address"),
+                            )
+                            if add_ctx.get("primary_phone"):
+                                org.primary_phone = add_ctx["primary_phone"]
+                            session.add(org)
+                            await session.commit()
+                    except Exception:
+                        await update.message.reply_text(get_text("operation_failed", lang), reply_markup=ReplyKeyboardRemove())
+                        return ADMIN_ADD_ORG_LOCATION
+                    context.user_data.pop("add_org", None)
+                    await update.message.reply_text(get_text("org_approved", lang).format(name=name), reply_markup=ReplyKeyboardRemove())
+                    return ConversationHandler.END
+                # Otherwise ask for email next
+                add_ctx = context.user_data.get("add_org", {})
+                add_ctx["step"] = "email"
+                context.user_data["add_org"] = add_ctx
+                try:
+                    email_actions_kb = InlineKeyboardMarkup(
+                        [[
+                            InlineKeyboardButton(get_text("update_phone", lang), callback_data="admin_add_org_add_phone"),
+                            InlineKeyboardButton(get_text("skip", lang), callback_data="admin_add_org_skip_email")
+                        ]]
+                    )
+                    await update.message.reply_text(get_text("email_instructions", lang), reply_markup=email_actions_kb)
+                except Exception:
+                    await update.message.reply_text(get_text("email_instructions", lang))
+                return ADMIN_ADD_ORG_EMAIL
+
     # Handle GPS location
     if getattr(update, 'message', None) and getattr(update.message, 'location', None):
         loc = update.message.location
@@ -3207,7 +3176,44 @@ async def handle_admin_add_org_location_input(update: Update, context: ContextTy
             await update.message.reply_text(get_text("error_location", lang), reply_markup=ReplyKeyboardRemove())
             return ADMIN_ADD_ORG_EMAIL
 
-        # Proceed to email step (טלפון אופציונלי)
+        # If email already provided earlier, finalize creation here
+        if add_ctx.get("email"):
+            name = add_ctx.get("name")
+            org_type = add_ctx.get("org_type")
+            latitude = add_ctx.get("latitude")
+            longitude = add_ctx.get("longitude")
+            city = add_ctx.get("city")
+            address = add_ctx.get("address")
+            try:
+                async with async_session_maker() as session:
+                    org = Organization(
+                        name=name,
+                        organization_type=OrganizationType(org_type),
+                        email=add_ctx.get("email"),
+                        alert_channels=[],
+                        is_active=True,
+                        is_verified=True,
+                        latitude=latitude if latitude else None,
+                        longitude=longitude if longitude else None,
+                        city=city,
+                        address=address,
+                    )
+                    if add_ctx.get("primary_phone"):
+                        org.primary_phone = add_ctx["primary_phone"]
+                    if latitude and longitude:
+                        try:
+                            org.location = create_point_from_coordinates(latitude, longitude)
+                        except Exception:
+                            pass
+                    session.add(org)
+                    await session.commit()
+            except Exception:
+                await update.message.reply_text(get_text("operation_failed", lang))
+                return ADMIN_ADD_ORG_LOCATION
+            context.user_data.pop("add_org", None)
+            await update.message.reply_text(get_text("org_approved", lang).format(name=name), reply_markup=ReplyKeyboardRemove())
+            return ConversationHandler.END
+        # Otherwise proceed to email step (טלפון אופציונלי)
         add_ctx["step"] = "email"
         context.user_data["add_org"] = add_ctx
         try:
@@ -3248,7 +3254,44 @@ async def handle_admin_add_org_location_input(update: Update, context: ContextTy
             except Exception:
                 pass
 
-            # Proceed to email step (טלפון אופציונלי)
+            # If email already provided earlier, finalize creation here
+            if add_ctx.get("email"):
+                name = add_ctx.get("name")
+                org_type = add_ctx.get("org_type")
+                latitude = add_ctx.get("latitude")
+                longitude = add_ctx.get("longitude")
+                city = add_ctx.get("city")
+                address = add_ctx.get("address")
+                try:
+                    async with async_session_maker() as session:
+                        org = Organization(
+                            name=name,
+                            organization_type=OrganizationType(org_type),
+                            email=add_ctx.get("email"),
+                            alert_channels=[],
+                            is_active=True,
+                            is_verified=True,
+                            latitude=latitude if latitude else None,
+                            longitude=longitude if longitude else None,
+                            city=city,
+                            address=address,
+                        )
+                        if add_ctx.get("primary_phone"):
+                            org.primary_phone = add_ctx["primary_phone"]
+                        if latitude and longitude:
+                            try:
+                                org.location = create_point_from_coordinates(latitude, longitude)
+                            except Exception:
+                                pass
+                        session.add(org)
+                        await session.commit()
+                except Exception:
+                    await update.message.reply_text(get_text("operation_failed", lang))
+                    return ADMIN_ADD_ORG_LOCATION
+                context.user_data.pop("add_org", None)
+                await update.message.reply_text(get_text("org_approved", lang).format(name=name), reply_markup=ReplyKeyboardRemove())
+                return ConversationHandler.END
+            # Otherwise proceed to email step (טלפון אופציונלי)
             add_ctx["step"] = "email"
             context.user_data["add_org"] = add_ctx
             try:
