@@ -60,3 +60,7 @@ rg -n "(shutil.rmtree|os.remove|Path.unlink|rm -rf|rimraf)" -S
 - אל תבצעו merge/PR שעלול לדרוס היסטוריה
 - בצעו git restore/git checkout לקבצים או git revert לקומיטים
 - אם אין היסטוריה מקומית: שחזרו מ‑CI artifacts / ענף גיבוי / מכונה אחרת
+
+## תיעוד
+
+- עיינו באתר התיעוד: `https://amirbiron.github.io/Animals-rescue/`

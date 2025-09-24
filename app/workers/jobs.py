@@ -561,6 +561,8 @@ async def _send_organization_alert_async(
             recipient = organization.email
         elif channel == "sms" and organization.primary_phone:
             recipient = organization.primary_phone
+        elif channel == "whatsapp" and organization.primary_phone:
+            recipient = organization.primary_phone
         
         if not recipient:
             logger.warning(

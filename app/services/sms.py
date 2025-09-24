@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+import os
 from typing import Optional, Dict, Any
 
 import structlog
@@ -41,15 +42,19 @@ class TwilioSMS:
     """Thin async wrapper around Twilio REST client for SMS sending."""
 
     def __init__(self) -> None:
-        if not (settings.TWILIO_ACCOUNT_SID and settings.TWILIO_AUTH_TOKEN and settings.TWILIO_SMS_FROM):
-            raise ConfigurationError("Twilio", "Missing TWILIO_* environment variables")
+        from_number = settings.TWILIO_SMS_FROM or os.getenv("TWILIO_FROM_NUMBER")
+        if not (settings.TWILIO_ACCOUNT_SID and settings.TWILIO_AUTH_TOKEN and from_number):
+            raise ConfigurationError(
+                "Twilio",
+                "Missing TWILIO_* environment variables (require TWILIO_SMS_FROM or TWILIO_FROM_NUMBER)",
+            )
         # Lazy import to avoid import at startup if unused
         try:
             from twilio.rest import Client  # type: ignore
         except Exception as exc:
             raise ConfigurationError("Twilio", f"Twilio client not installed: {exc}")
         self._Client = Client
-        self._from = settings.TWILIO_SMS_FROM
+        self._from = from_number
 
     async def send(self, to_phone: str, body: str) -> SmsResult:
         loop = asyncio.get_event_loop()
