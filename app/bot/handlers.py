@@ -3167,7 +3167,7 @@ async def handle_admin_add_org_location_input(update: Update, context: ContextTy
             )
         except Exception:
             await update.message.reply_text(get_text("error_location", lang), reply_markup=ReplyKeyboardRemove())
-            return ADMIN_ADD_ORG_EMAIL
+            return ADMIN_ADD_ORG_LOCATION
 
         # If email already provided earlier, finalize creation here
         if add_ctx.get("email"):
@@ -3301,10 +3301,10 @@ async def handle_admin_add_org_location_input(update: Update, context: ContextTy
             return ADMIN_ADD_ORG_EMAIL
 
         await update.message.reply_text(get_text("address_not_found", lang))
-        return ADMIN_ADD_ORG_EMAIL
+        return ADMIN_ADD_ORG_LOCATION
 
-    # No relevant input
-    return ADMIN_ADD_ORG_EMAIL
+    # No relevant input, stay in location step
+    return ADMIN_ADD_ORG_LOCATION
 
 async def handle_admin_add_org_skip_email(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Skip capturing email and create the organization without email."""
