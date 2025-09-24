@@ -120,8 +120,12 @@ class ManagedWorker:
         signal.signal(signal.SIGTERM, signal_handler)
         signal.signal(signal.SIGINT, signal_handler)
     
-    def start(self):
-        """Start the worker process."""
+    def start(self, with_scheduler: bool = False):
+        """Start the worker process.
+
+        Args:
+            with_scheduler: Run RQ scheduler inside this worker process.
+        """
         if self.is_running:
             logger.warning(f"Worker {self.worker_id} is already running")
             return
@@ -157,7 +161,7 @@ class ManagedWorker:
             
             # Run worker (blocks until stopped)
             self.worker.work(
-                with_scheduler=False,
+                with_scheduler=with_scheduler,
                 logging_level='INFO'
             )
             
@@ -417,11 +421,12 @@ class WorkerManager:
         """Start all worker processes."""
         for i in range(WORKER_PROCESSES):
             worker_id = f"worker_{i+1}"
+            with_scheduler = (i == 0)
             
             # Create worker process
             process = mp.Process(
                 target=self._worker_process_target,
-                args=(worker_id, WORKER_QUEUES),
+                args=(worker_id, WORKER_QUEUES, with_scheduler),
                 name=f"RQWorker-{worker_id}"
             )
             
@@ -430,7 +435,7 @@ class WorkerManager:
             
             logger.info(f"Started worker process {worker_id} (PID: {process.pid})")
     
-    def _worker_process_target(self, worker_id: str, queues: List[str]):
+    def _worker_process_target(self, worker_id: str, queues: List[str], with_scheduler: bool = False):
         """Target function for worker processes."""
         try:
             # Create worker in subprocess
@@ -441,7 +446,7 @@ class WorkerManager:
             )
             
             # Start worker (blocks until stopped)
-            worker.start()
+            worker.start(with_scheduler=with_scheduler)
             
         except Exception as e:
             logger.error(f"Worker process {worker_id} failed", error=str(e))
@@ -526,7 +531,7 @@ class WorkerManager:
             # Start new process
             new_process = mp.Process(
                 target=self._worker_process_target,
-                args=(worker_id, WORKER_QUEUES),
+                args=(worker_id, WORKER_QUEUES, worker_id == "worker_1"),
                 name=f"RQWorker-{worker_id}"
             )
             
