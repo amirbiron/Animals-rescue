@@ -55,12 +55,28 @@ async def serve_docs_home():
 @router.get("/{file_path:path}")
 async def serve_docs_file(file_path: str):
     """Serve documentation static files"""
-    file = DOCS_PATH / file_path
-    if file.exists() and file.is_file():
-        return FileResponse(file)
-    # Try with .html extension
-    html_file = DOCS_PATH / f"{file_path}.html"
-    if html_file.exists():
-        return FileResponse(html_file, media_type="text/html")
-    # Return 404
+    # Sanitize and validate the path to prevent directory traversal
+    try:
+        # Resolve the full path
+        requested_file = (DOCS_PATH / file_path).resolve()
+        
+        # CRITICAL: Check that the resolved path is within DOCS_PATH
+        # This prevents directory traversal attacks like ../../etc/passwd
+        if not str(requested_file).startswith(str(DOCS_PATH.resolve())):
+            return HTMLResponse("Access denied", status_code=403)
+        
+        # Serve the file if it exists
+        if requested_file.exists() and requested_file.is_file():
+            return FileResponse(requested_file)
+        
+        # Try with .html extension
+        html_file = (DOCS_PATH / f"{file_path}.html").resolve()
+        if str(html_file).startswith(str(DOCS_PATH.resolve())) and html_file.exists():
+            return FileResponse(html_file, media_type="text/html")
+            
+    except Exception:
+        # Any path resolution errors = 404
+        pass
+    
+    # Return 404 for anything else
     return HTMLResponse("File not found", status_code=404)
