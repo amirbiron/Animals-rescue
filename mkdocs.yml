@@ -104,19 +104,12 @@ nav:
     - api-reference.md
   - מדריכים:
     - admin-guide.md
-    - organization-guide.md
   - פיתוח:
     - dev-guide.md
-    - testing.md
-    - contributing.md
   - תפעול:
     - ops.md
-    - deployment.md
-    - monitoring.md
   - נוסף:
     - faq.md
-    - troubleshooting.md
-    - changelog.md
 
 # נתונים נוספים
 extra:

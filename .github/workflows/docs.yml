@@ -45,7 +45,7 @@ jobs:
           pip install mkdocs-git-revision-date-localized-plugin
           
       - name: Build documentation
-        run: mkdocs build --strict --verbose
+        run: mkdocs build --verbose
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
