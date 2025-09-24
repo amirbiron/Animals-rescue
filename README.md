@@ -259,10 +259,11 @@ python -c "import asyncio; from app.models.database import create_tables; asynci
     -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
     -f scripts/update_alert_channels.sql
   ```
-- לחלופין, ניתן ליצור Render Cron Job שמריץ פעם בשעה:
+- לחלופין, ניתן ליצור Render Cron Job שמריץ פעם בשעה (ללא Workers):
   ```bash
-  python -c "from app.workers.jobs import reconcile_alert_channels as f; print(f())"
+  python -c "import asyncio, json; from app.workers.jobs import _reconcile_alert_channels_async as f; print(json.dumps(asyncio.run(f())))"
   ```
+  שימו לב: אל תקראו ל-<code>reconcile_alert_channels</code> (מסומן ב-<code>@job</code>) כי הוא רק מכניס לתור ודורש Worker פעיל.
 
 ## 🔐 אבטחה
 - אימות JWT  
