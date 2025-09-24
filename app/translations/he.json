@@ -26,6 +26,7 @@
   "skip": "דלג",
   "enter_address_manually": "הכנס כתובת ידנית",
   "address_unavailable": "כתובת לא זמינה (נקלטו רק נקודות ציון)",
+  "org_address_required": "כתובת/מיקום חובה כדי להוסיף ארגון. שלחו מיקום GPS או הקלידו כתובת.",
   "address_not_found": "לא מצאנו את הכתובת, נסו אחרת.",
   "error_geocoding": "שגיאה באיתור הכתובת.",
   "location_confirmed": "המיקום אושר: {address} · עיר: {city}",
@@ -147,6 +148,7 @@
   "email_updated": "כתובת האימייל עודכנה ל‑{email} ✅",
   "invalid_phone": "מספר טלפון לא תקין",
   "invalid_email": "כתובת אימייל לא תקינה",
+  "org_phone_required": "מספר טלפון חובה כדי להוסיף ארגון. הכנס מספר תקין.",
   
   "org_reports_assigned": "📥 דיווחים שהוקצו לי",
   "org_acknowledge_report": "✅ אישור קבלת דיווח",

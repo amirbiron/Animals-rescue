@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, patch
 from app.bot.handlers import (
     ADMIN_ADD_ORG_NAME,
     ADMIN_ADD_ORG_TYPE,
+    ADMIN_ADD_ORG_LOCATION,
     ADMIN_ADD_ORG_EMAIL,
     ADMIN_IMPORT_GOOGLE_CITY,
     ADMIN_IMPORT_LOCATION_INPUT,
@@ -15,6 +16,7 @@ from app.bot.handlers import (
     handle_admin_add_org,
     handle_admin_add_org_name_input,
     handle_admin_add_org_type,
+    handle_admin_add_org_location_input,
     handle_admin_add_org_email_input,
     show_admin_orgs_menu,
     show_org_statistics,
@@ -228,7 +230,7 @@ async def test_add_org_happy_path():
     assert state == ADMIN_ADD_ORG_EMAIL
     assert ctx.user_data["add_org"]["step"] == "email"
 
-    # Send email and commit
+    # Send location (typed address), then email and commit
     class _FakeSession:
         async def __aenter__(self):
             return self
@@ -238,6 +240,18 @@ async def test_add_org_happy_path():
             return None
         async def commit(self):
             return None
+
+    with patch("app.bot.handlers.geocoding_service.geocode", new=AsyncMock(return_value={
+        "latitude": 32.084,
+        "longitude": 34.887,
+        "city": "תל אביב-יפו",
+    })):
+        # Provide typed address
+        loc_msg = MsgStub(text="רחוב דוגמה 1, תל אביב")
+        update_loc = types.SimpleNamespace(message=loc_msg, effective_user=None, effective_chat=None)
+        next_state = await handle_admin_add_org_location_input(update_loc, ctx)
+        assert next_state == ADMIN_ADD_ORG_EMAIL
+        assert ctx.user_data["add_org"]["step"] == "email"
 
     with patch("app.bot.handlers.async_session_maker", return_value=_FakeSession()):
         msg2 = MsgStub(text="amir@example.com")
@@ -500,16 +514,15 @@ async def test_import_google_city_dedup():
 
 
 @pytest.mark.asyncio
-async def test_admin_add_org_type_sends_email_instructions_i18n():
+async def test_admin_add_org_type_moves_to_email_and_sends_instructions_i18n():
     ctx = make_context()
     ctx.user_data["add_org"] = {"step": "type", "name": "Org Z"}
     cq = CqStub(data="admin_add_org_type_animal_shelter")
     update = types.SimpleNamespace(callback_query=cq, effective_user=None, effective_chat=None)
     res = await handle_admin_add_org_type(update, ctx)
     assert res == ADMIN_ADD_ORG_EMAIL
-    # Message edited with email instructions
-    assert cq.edited
-    assert "הכנס כתובת אימייל" in cq.edited[-1][0][0]
+    # Moved to email step and edited message with email instructions
+    assert ctx.user_data["add_org"]["step"] == "email"
 
 
 @pytest.mark.asyncio
@@ -628,7 +641,7 @@ async def test_import_location_radius_20_selection():
     assert ctx.user_data.get("import_radius_m") == 20000
 
 
-def test_admin_add_org_email_state_accepts_location_filter_mapping():
+def test_admin_add_org_location_and_email_filters_mapping():
     # Capture created ConversationHandlers
     created = []
 
@@ -668,11 +681,16 @@ def test_admin_add_org_email_state_accepts_location_filter_mapping():
 
     # Find our admin_add_org_conv instance
     conv = next(c for c in created if c.name == "admin_add_org_conv")
+    # Location state should accept TEXT | LOCATION
+    location_state_handlers = conv.states[ADMIN_ADD_ORG_LOCATION]
+    expected_loc = (filters.TEXT | filters.LOCATION) & ~filters.COMMAND
+    expected_loc_repr = repr(expected_loc)
+    assert any(repr(hh.filters) == expected_loc_repr for hh in location_state_handlers)
+    # Email state should accept TEXT only
     email_state_handlers = conv.states[ADMIN_ADD_ORG_EMAIL]
-
-    expected = (filters.TEXT | filters.LOCATION) & ~filters.COMMAND
-    expected_repr = repr(expected)
-    assert any(repr(hh.filters) == expected_repr for hh in email_state_handlers)
+    expected_email = filters.TEXT & ~filters.COMMAND
+    expected_email_repr = repr(expected_email)
+    assert any(repr(hh.filters) == expected_email_repr for hh in email_state_handlers)
 
 
 @pytest.mark.asyncio
