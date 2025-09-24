@@ -22,11 +22,12 @@ BEGIN
       AND btrim(primary_phone) <> ''
       AND COALESCE(array_length(alert_channels, 1), 0) = 0;
 
-    -- עדכון: רק WhatsApp ואז SMS (סדר עדיפות)
+    -- עדכון: רק WhatsApp ואז SMS (סדר עדיפות) – מבלי לדרוס ערכים קיימים
     UPDATE organizations
     SET alert_channels = ARRAY['whatsapp','sms']
     WHERE primary_phone IS NOT NULL
-      AND btrim(primary_phone) <> '';
+      AND btrim(primary_phone) <> ''
+      AND COALESCE(array_length(alert_channels, 1), 0) = 0;  -- עדכן רק כש-ARRAY ריק/NULL
 
     GET DIAGNOSTICS updated_rows = ROW_COUNT;
 
