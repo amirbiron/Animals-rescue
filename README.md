@@ -185,12 +185,17 @@ uvicorn app.main:app --host 0.0.0.0 --port $PORT
 - WEBHOOK_HOST (למשל: https://<your-app>.onrender.com)
 - TELEGRAM_WEBHOOK_SECRET (מחרוזת אקראית)
 - DATABASE_URL (Postgres)
-- REDIS_URL (Redis)
+- REDIS_URL (Redis) או REDIS_TLS_URL (אם הספק מספק חיבור TLS)
 - ENVIRONMENT=production
 - ENABLE_WORKERS=false (לשירות ה-Web)
-- GOOGLE_PLACES_API_KEY (חיוני)
-- GOOGLE_GEOCODING_API_KEY (אופציונלי; אם לא, נשתמש ב-Places)
-- SERPAPI_KEY (אופציונלי; הפעלה מומלצת להשלמת טלפון/אתר לארגונים)
+- GOOGLE_PLACES_API_KEY (אם משתמשים ב‑Google)
+- GOOGLE_GEOCODING_API_KEY (אופציונלי; אם לא, נשתמש ב‑Places)
+- SERPAPI_KEY (אופציונלי; להשלמת פרטי קשר לארגונים)
+- Twilio (נדרש אם ה‑Web שולח SMS/WhatsApp כשה‑ENABLE_WORKERS=false):
+  - TWILIO_ACCOUNT_SID
+  - TWILIO_AUTH_TOKEN
+  - TWILIO_SMS_FROM או TWILIO_FROM_NUMBER
+  - TWILIO_WHATSAPP_FROM
 
 2) Background Worker (RQ Workers + Scheduler)
 - Build Command:
@@ -203,13 +208,21 @@ python -c "from app.workers.manager import run_workers_cli; run_workers_cli()"
 ```
 
 משתני סביבה לשירות ה-Worker:
-- DATABASE_URL, REDIS_URL (כמו ב-Web)
+- DATABASE_URL, REDIS_URL (כמו ב‑Web)
 - ENVIRONMENT=production
 - ENABLE_WORKERS=true
+- TELEGRAM_BOT_TOKEN (נדרש כי השירות נטען ומשתמש ב‑TelegramAlertsService)
 - WORKER_PROCESSES=2 (לפי עומס)
 - WORKER_TIMEOUT=300 (אופציונלי)
 - GOOGLE_PLACES_API_KEY / GOOGLE_GEOCODING_API_KEY (לסנכרוני Places/Geocoding)
 - SERPAPI_KEY (להעשרת פרטי קשר דרך SerpAPI)
+- Twilio (אם ה‑Worker שולח SMS/WhatsApp):
+  - TWILIO_ACCOUNT_SID
+  - TWILIO_AUTH_TOKEN
+  - TWILIO_SMS_FROM או TWILIO_FROM_NUMBER
+  - TWILIO_WHATSAPP_FROM
+
+הערה: אין צורך להגדיר REDIS_QUEUE_URL ידנית – הוא נגזר אוטומטית מ‑REDIS_URL למסד 1.
 
 3) שירותים מנוהלים
 - Render PostgreSQL → חשפו `DATABASE_URL`
@@ -231,55 +244,25 @@ python -c "import asyncio; from app.models.database import create_tables; asynci
 - בוט מגיב ל-/start
 - לחצן "🏢 ניהול ארגונים" מציג אפשרויות ייבוא וסנכרון
 
-### פריסה ב־Render
+#### מי שולח SMS/WhatsApp?
+- ENABLE_WORKERS=false (Web בלבד): ה‑Web Service שולח SMS/WhatsApp בעצמו (inline, asyncio).
+- ENABLE_WORKERS=true (עם Worker): ה‑Worker שולח דרך תורי RQ. ה‑Web לא ישלח בעצמו.
 
-ב־[Render](https://render.com/) יש להקים שני שירותים עיקריים:
+הערה: בלי Worker לא ירוצו ג׳ובים תקופתיים (ריטריים, סטטיסטיקות, reconcile וכו'), אבל השליחה הראשונית עדיין תצא מה‑Web אם הערוצים זמינים.
 
-1. **Web Service (שירות אינטרנטי)**  
-   - מיועד להרצת FastAPI (ה־API הראשי + Webhook של טלגרם).  
-   - **Build Command**:  
-     ```bash
-     pip install -r requirements.txt
-     ```  
-   - **Start Command**:  
-     ```bash
-     uvicorn app.main:app --host 0.0.0.0 --port 10000
-     ```  
-
-2. **Background Worker (וורקר ברקע)**  
-   - מיועד להריץ את ה־RQ Workers שמטפלים במשימות רקע.  
-   - **Build Command**:  
-     ```bash
-     pip install -r requirements.txt
-     ```  
-   - **Start Command**:  
-     ```bash
-     rq worker -u $REDIS_URL default alerts maintenance external
-     ```  
-
-3. **שירותי צד ג׳ מנוהלים**  
-   - מומלץ להוסיף גם **Redis** ו־**PostgreSQL** כשירותים מנוהלים ישירות מ־Render.  
-   - את פרטי ההתחברות מגדירים במשתני הסביבה:  
-     - `DATABASE_URL` למסד הנתונים  
-     - `REDIS_URL` ל־Redis  
-
-> ⚠️ הערה: ניתן להגדיר שירותי Redis/Postgres גם מחוץ ל־Render, אך הפתרון המובנה שלהם מקל על תחזוקה וסקיילינג.
-
-### משתני סביבה לפרודקשן
-- `ENVIRONMENT=production`  
-- `DATABASE_URL`, `REDIS_URL` וכו’  
-
-### ארכיטקטורה מומלצת
-- Load Balancer (nginx)  
-- מספר מופעי FastAPI  
-- PostgreSQL  
-- Redis + Workers  
-
-### שיקולי סקיילינג
-- שרתי API – סקייל אופקי  
-- Workers – לפי עומס  
-- DB – רפליקות קריאה  
-- Redis Cluster  
+#### עדכון אוטומטי של alert_channels
+- המערכת כוללת ג׳וב `reconcile_alert_channels` שמתוזמן שעתי דרך RQ Scheduler (רץ כשיש Worker). הוא מוסיף 'whatsapp' ו‑'sms' כשיש `primary_phone` ועוד.
+- אם אין Worker, אפשר להריץ יישור חד‑פעמי לנתונים עם הסקריפט הבא:
+  ```bash
+  # ודאו שהמשתנים מוגדרים: POSTGRES_HOST/PORT/USER/DB/POSTGRES_PASSWORD
+  PGPASSWORD="$POSTGRES_PASSWORD" psql \
+    -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+    -f scripts/update_alert_channels.sql
+  ```
+- לחלופין, ניתן ליצור Render Cron Job שמריץ פעם בשעה:
+  ```bash
+  python -c "from app.workers.jobs import reconcile_alert_channels as f; print(f())"
+  ```
 
 ## 🔐 אבטחה
 - אימות JWT  
