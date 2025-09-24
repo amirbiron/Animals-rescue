@@ -176,8 +176,12 @@ class ManagedWorker:
         self.should_stop = True
         
         if self.worker:
-            # Send stop signal to worker
-            self.worker.request_stop(signum=signal.SIGTERM)
+            # Send stop signal to worker (RQ>=2.0 expects frame param)
+            try:
+                self.worker.request_stop(signal.SIGTERM, None)
+            except TypeError:
+                # Fallback for older RQ versions
+                self.worker.request_stop()
             
             # Wait for graceful shutdown
             start_time = time.time()
