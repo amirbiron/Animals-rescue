@@ -24,6 +24,7 @@
   "request_location_instructions": "شارك موقع GPS أو اكتب عنوانًا.",
   "share_location": "مشاركة الموقع",
   "skip": "تخطي",
+  "org_address_required": "العنوان/الموقع مطلوب لإضافة منظمة. شارك GPS أو اكتب عنوانًا.",
   "enter_address_manually": "إدخال العنوان يدويًا",
   "address_unavailable": "العنوان غير متاح (إحداثيات فقط)",
   "address_not_found": "لم نعثر على هذا العنوان.",

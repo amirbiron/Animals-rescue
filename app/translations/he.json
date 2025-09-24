@@ -26,6 +26,7 @@
   "skip": "דלג",
   "enter_address_manually": "הכנס כתובת ידנית",
   "address_unavailable": "כתובת לא זמינה (נקלטו רק נקודות ציון)",
+  "org_address_required": "כתובת/מיקום חובה כדי להוסיף ארגון. שלחו מיקום GPS או הקלידו כתובת.",
   "address_not_found": "לא מצאנו את הכתובת, נסו אחרת.",
   "error_geocoding": "שגיאה באיתור הכתובת.",
   "location_confirmed": "המיקום אושר: {address} · עיר: {city}",
