@@ -264,7 +264,11 @@ async def test_add_org_happy_path():
     with patch("app.bot.handlers.async_session_maker", return_value=_FakeSession()):
         msg2 = MsgStub(text="amir@example.com")
         update_msg2 = types.SimpleNamespace(message=msg2, effective_user=None, effective_chat=None)
-        end = await handle_admin_add_org_email_input(update_msg2, ctx)
+        state_after_email = await handle_admin_add_org_email_input(update_msg2, ctx)
+        assert state_after_email == ADMIN_ADD_ORG_LOCATION
+        # Skip location to finalize
+        skip_msg = MsgStub(text="דלג")
+        end = await handle_admin_add_org_location_input(types.SimpleNamespace(message=skip_msg, effective_user=None, effective_chat=None), ctx)
         assert end == ConversationHandler.END
         assert "add_org" not in ctx.user_data
 
