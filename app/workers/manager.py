@@ -130,8 +130,7 @@ class ManagedWorker:
                 queues=self.queues,
                 connection=self.connection,
                 name=self.worker_id,
-                default_worker_ttl=WORKER_TIMEOUT,
-                default_job_timeout=JOB_TIMEOUT
+                default_worker_ttl=WORKER_TIMEOUT
             )
             
             # Setup job lifecycle hooks
