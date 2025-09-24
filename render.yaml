@@ -1,0 +1,29 @@
+services:
+  # Static Site for Documentation
+  - type: web
+    name: animal-rescue-docs
+    runtime: static
+    buildCommand: |
+      pip install mkdocs mkdocs-material mkdocs-minify-plugin
+      mkdocs build
+    staticPublishPath: ./site
+    pullRequestPreviewsEnabled: true
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    headers:
+      - path: /*
+        name: X-Frame-Options
+        value: SAMEORIGIN
+
+  # Main API Service (existing)
+  - type: web
+    name: animal-rescue-api
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      # ... rest of your env vars
