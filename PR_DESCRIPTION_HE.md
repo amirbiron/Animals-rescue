@@ -45,6 +45,11 @@ PR זה מוסיף אתר תיעוד מקיף ומקצועי למערכת בוט
 3. האתר יעלה ב: https://[username].github.io/[repo]/
 ```
 
+### Preview לכל PR (Docs)
+- Render מייצר Preview אוטומטי לאתר התיעוד לכל Pull Request.
+- קישור ה‑Preview יוצג ב‑Checks של ה‑PR תחת השירות: "animal-rescue-docs".
+- ניתן להוסיף ידנית לתיאור ה‑PR: `Docs Preview: <הקישור מה‑Checks>`.
+
 ### הרצה מקומית
 ```bash
 # אופציה 1: סקריפט אוטומטי
