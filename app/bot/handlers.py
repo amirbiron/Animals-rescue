@@ -550,15 +550,16 @@ async def handle_delete_report(update: Update, context: ContextTypes.DEFAULT_TYP
         if report.status not in [ReportStatus.SUBMITTED, ReportStatus.PENDING]:
             await query.edit_message_text("לא ניתן למחוק דיווח לאחר שהטיפול החל.")
             return
-        report.status = ReportStatus.CLOSED
+        # Hard delete the report and its related records (files/alerts) via cascades
         try:
+            await session.delete(report)
             await session.commit()
         except Exception:
             await session.rollback()
             await query.edit_message_text(get_text("operation_failed", lang))
             return
 
-    await query.edit_message_text("הדיווח נמחק ✅")
+    await query.edit_message_text("הדיווח נמחק מהמסד ✅")
 
 
 # =============================================================================
