@@ -73,6 +73,10 @@ Response:
 }
 ```
 
+Note:
+- Primary notifications are sent to rescue organizations/shelters/volunteer groups/municipality only.
+- The reporter receives guidance with a short checklist and up to 3 nearby veterinary clinics (name/address/phone) for self‑transport if possible.
+
 #### Get Report
 ```http
 GET /api/v1/reports/{report_id}
