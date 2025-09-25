@@ -35,7 +35,7 @@ from app.services.google import GoogleService
 from app.services.serpapi import SerpAPIService
 from app.services.nlp import NLPService
 from app.services.email import EmailService
-from app.services.telegram_alerts import TelegramAlertsService, TelegramMessage
+from app.services.telegram_alerts import TelegramAlertsService, TelegramMessage, TelegramFormatter
 from app.services.whatsapp import get_whatsapp_service
 from app.services.sms import get_sms_service
 from app.services.sms import _normalize_e164 as _normalize_phone_e164
@@ -896,10 +896,15 @@ async def _notify_reporter_with_instructions(report: Report) -> None:
     if clinics:
         lines.append(get_text("reporter.instructions.vets_title", lang))
         for c in clinics[:3]:
-            name = c.get("name") or "מרפאה"
-            addr = c.get("address") or ""
-            phone = c.get("phone") or ""
-            lines.append(f"• {name} — {addr} {('— ' + phone) if phone else ''}")
+            # Escape for Telegram HTML parse mode
+            name_raw = c.get("name") or "מרפאה"
+            addr_raw = c.get("address") or ""
+            phone_raw = c.get("phone") or ""
+            name = TelegramFormatter.escape_html(name_raw)
+            addr = TelegramFormatter.escape_html(addr_raw)
+            phone = TelegramFormatter.escape_html(phone_raw)
+            sep_phone = f" — {phone}" if phone else ""
+            lines.append(f"• {name} — {addr}{sep_phone}")
     else:
         lines.append(get_text("reporter.instructions.vets_fallback", lang))
 
