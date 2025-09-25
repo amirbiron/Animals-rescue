@@ -759,6 +759,12 @@ async def _generate_alert_message(
                 f"{urgency_icon} {get_text('alert.new_report.body', lang)}",
                 f"#{report.public_id}",
             ]
+            # Include short description if available
+            if report.description:
+                desc = (report.description or "").strip()
+                if len(desc) > 180:
+                    desc = desc[:177] + "…"
+                parts.append(f"{get_text('report.description', lang)}: {desc}")
             if city:
                 parts.append(f"{get_text('report.location', lang)}: {city}")
             if report.latitude and report.longitude:
