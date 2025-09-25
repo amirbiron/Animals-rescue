@@ -746,38 +746,63 @@ async def _generate_alert_message(
     except Exception:
         # Fallbacks for text-only channels (sms/whatsapp) when specific template missing
         if channel in {"sms", "whatsapp"}:
-            # Minimal text rendering without template
-            # Compose a compact, RTL-friendly line
+            # פולבאק טקסטואלי לערוצים פשוטים: WhatsApp/SMS
             urgency_icon = {
                 UrgencyLevel.CRITICAL: "🚨",
                 UrgencyLevel.HIGH: "🔴",
-                UrgencyLevel.MEDIUM: "🟡",
+                UrgencyLevel.MEDIUM: "🟠",
                 UrgencyLevel.LOW: "🟢",
             }.get(report.urgency_level, "📢")
-            city = report.city or ""
-            parts = [
-                f"{urgency_icon} {get_text('alert.new_report.body', lang)}",
-                f"#{report.public_id}",
-            ]
-            # Include short description if available
-            if report.description:
-                desc = (report.description or "").strip()
+
+            # טרימינג לתיאור קצר
+            desc = (report.description or "").strip()
+            if desc:
                 if len(desc) > 180:
                     desc = desc[:177] + "…"
-                parts.append(f"{get_text('report.description', lang)}: {desc}")
-            # Reporter phone (optional)
+
+            # שם משתמש או טלפון של המדווח
+            reporter_username = None
+            reporter_phone = None
             try:
-                reporter_phone = getattr(getattr(report, 'reporter', None), 'phone', None)
+                reporter = getattr(report, 'reporter', None)
+                reporter_username = getattr(reporter, 'username', None)
+                reporter_phone = getattr(reporter, 'phone', None)
             except Exception:
-                reporter_phone = None
-            if reporter_phone:
-                parts.append(f"📞 {reporter_phone}")
-            if city:
-                parts.append(f"{get_text('report.location', lang)}: {city}")
+                pass
+
+            reporter_display = None
+            if reporter_username:
+                reporter_display = f"@{reporter_username}"
+            elif reporter_phone:
+                reporter_display = reporter_phone
+
+            # עיר וקישור מפה
+            city = report.city or ""
+            maps_url = None
             if report.latitude and report.longitude:
-                parts.append(f"https://maps.google.com/?q={report.latitude},{report.longitude}")
-            text_message = " | ".join(parts)
-            return {"message": text_message, "subject": None, "template": "inline_text"}
+                maps_url = f"https://maps.google.com/?q={report.latitude},{report.longitude}"
+
+            # הודעה רב-שורתית, תואם לדוגמה המבוקשת
+            lines: List[str] = []
+            lines.append(f"{urgency_icon} {get_text('alert.new_report.body', lang)}!")
+            lines.append(f"🔹 מזהה: #{report.public_id}")
+            # סוג חיה
+            try:
+                animal_text = get_text(f"animal_{report.animal_type.value}", lang)
+            except Exception:
+                animal_text = str(report.animal_type.value).capitalize()
+            lines.append(f"🔹 סוג חיה: {animal_text}")
+            if desc:
+                lines.append(f"🔹 תיאור: {desc}")
+            if city:
+                lines.append(f"🔹 מיקום: {city}")
+            if maps_url:
+                lines.append(f"📍 {maps_url}")
+            if reporter_display:
+                lines.append(f"👤 מדווח: {reporter_display}")
+
+            text_message = "\n".join(lines)
+            return {"message": text_message, "subject": None, "template": "inline_text_multiline"}
         # Else fallback to Hebrew template
         template_name = f"alert_{channel}_he.j2"
         template = template_env.get_template(template_name)
