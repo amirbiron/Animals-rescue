@@ -38,6 +38,7 @@ from app.services.email import EmailService
 from app.services.telegram_alerts import TelegramAlertsService
 from app.services.whatsapp import get_whatsapp_service
 from app.services.sms import get_sms_service
+from app.services.sms import _normalize_e164 as _normalize_phone_e164
 from app.core.i18n import get_text
 
 # =============================================================================
@@ -806,7 +807,11 @@ async def _generate_alert_message(
             except Exception:
                 org_phone = None
             if org_phone:
-                lines.append(f"☎️ ארגון: {org_phone}")
+                try:
+                    org_phone_norm = _normalize_phone_e164(org_phone)
+                except Exception:
+                    org_phone_norm = org_phone
+                lines.append(f"☎️ ארגון: {org_phone_norm}")
 
             text_message = "\n".join(lines)
             return {"message": text_message, "subject": None, "template": "inline_text_multiline"}
