@@ -884,22 +884,24 @@ async def _notify_reporter_with_instructions(report: Report) -> None:
 
     # Build guidance message in Hebrew (default)
     lang = report.language or "he"
+    # Use i18n strings
+    from app.core.i18n import get_text
     lines: List[str] = []
-    lines.append("ℹ️ הנחיות ראשוניות:")
-    lines.append("- אם אפשר ובטוח, נסו להביא את החיה למרפאה קרובה")
-    lines.append("- אם החיה פצועה קשה/מסוכנת – המתינו למחלץ, אל תסתכנו")
+    lines.append(get_text("reporter.instructions.header", lang))
+    lines.append("- " + get_text("reporter.instructions.line1", lang))
+    lines.append("- " + get_text("reporter.instructions.line2", lang))
     if report.city:
-        lines.append(f"- עיר/אזור: {report.city}")
+        lines.append("- " + get_text("reporter.instructions.area", lang).format(city=report.city))
     lines.append("")
     if clinics:
-        lines.append("מרפאות קרובות:")
+        lines.append(get_text("reporter.instructions.vets_title", lang))
         for c in clinics[:3]:
             name = c.get("name") or "מרפאה"
             addr = c.get("address") or ""
             phone = c.get("phone") or ""
             lines.append(f"• {name} — {addr} {('— ' + phone) if phone else ''}")
     else:
-        lines.append("לא נמצאו מרפאות קרובות כרגע. מומלץ לחפש 'וטרינר' במפות.")
+        lines.append(get_text("reporter.instructions.vets_fallback", lang))
 
     text_message = "\n".join(lines)
 
