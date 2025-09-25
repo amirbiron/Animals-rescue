@@ -169,6 +169,17 @@ async def _process_new_report_async(report_id: str) -> Dict[str, Any]:
                         seen_ids.add(org.id)
                 
                 organizations = unique_orgs
+
+                # Filter: send alerts only to rescue-oriented orgs (not veterinary clinics)
+                allowed_types = {
+                    OrganizationType.ANIMAL_SHELTER,
+                    OrganizationType.RESCUE_ORG,
+                    OrganizationType.VOLUNTEER_GROUP,
+                    OrganizationType.GOVERNMENT,
+                }
+                organizations = [
+                    o for o in organizations if getattr(o, "organization_type", None) in allowed_types
+                ]
                 results["organizations_found"] = len(organizations)
                 results["steps_completed"].append("organization_search")
                 
