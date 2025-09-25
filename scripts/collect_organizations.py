@@ -63,10 +63,18 @@ class GooglePlacesCollector:
         """
         if not search_types:
             search_types = [
-                "veterinary_care",
                 "animal shelter",
-                "emergency vet",
-                "animal hospital"
+                "pet rescue",
+                "animal rescue",
+                "rescue group",
+                "volunteer animal rescue",
+                "municipal vet",
+                "municipal animal services",
+                "עירייה וטרינרית",
+                "מחלקת וטרינריה עירונית",
+                # וטרינרים לשימוש במידע למדווח (לא לשליחת התראות)
+                "veterinary_care",
+                "animal hospital",
             ]
         
         organizations = []
@@ -194,10 +202,10 @@ if not place_id:
         if any(t in types for t in ["animal_shelter", "pet_adoption"]):
             return OrganizationType.ANIMAL_SHELTER.value
         
-        if "עמותה" in name or "אגודה" in name:
+        if "עמותה" in name or "אגודה" in name or "Rescue" in name or "חילוץ" in name:
             return OrganizationType.RESCUE_ORG.value
         
-        if "עירייה" in name or "מועצה" in name:
+        if "עירייה" in name or "מועצה" in name or "Municipal" in name or "City" in name:
             return OrganizationType.GOVERNMENT.value
         
         return OrganizationType.VET_CLINIC.value  # ברירת מחדל

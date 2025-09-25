@@ -35,7 +35,7 @@ from app.services.google import GoogleService
 from app.services.serpapi import SerpAPIService
 from app.services.nlp import NLPService
 from app.services.email import EmailService
-from app.services.telegram_alerts import TelegramAlertsService
+from app.services.telegram_alerts import TelegramAlertsService, TelegramMessage, TelegramFormatter
 from app.services.whatsapp import get_whatsapp_service
 from app.services.sms import get_sms_service
 from app.services.sms import _normalize_e164 as _normalize_phone_e164
@@ -169,6 +169,17 @@ async def _process_new_report_async(report_id: str) -> Dict[str, Any]:
                         seen_ids.add(org.id)
                 
                 organizations = unique_orgs
+
+                # Filter: send alerts only to rescue-oriented orgs (not veterinary clinics)
+                allowed_types = {
+                    OrganizationType.ANIMAL_SHELTER,
+                    OrganizationType.RESCUE_ORG,
+                    OrganizationType.VOLUNTEER_GROUP,
+                    OrganizationType.GOVERNMENT,
+                }
+                organizations = [
+                    o for o in organizations if getattr(o, "organization_type", None) in allowed_types
+                ]
                 results["organizations_found"] = len(organizations)
                 results["steps_completed"].append("organization_search")
                 
@@ -249,6 +260,13 @@ async def _process_new_report_async(report_id: str) -> Dict[str, Any]:
                     results["alerts_created"] += 1
             
             results["steps_completed"].append("alerts_queued")
+
+        # Step 7: Send instructions to reporter with nearby clinics list
+        try:
+            await _notify_reporter_with_instructions(report)
+            results["steps_completed"].append("reporter_notified")
+        except Exception as e:
+            logger.warning("Reporter instructions send failed", error=str(e))
     
     logger.info(
         "Report processing completed",
@@ -380,9 +398,17 @@ async def _find_organizations_by_type(
             conditions.append(Organization.city.ilike(f"%{city}%"))
         
         # Add specialty filter
+        # הוספת מילות מפתח כלליות לווטרינרים מבטיחה שארגונים עם תגיות כמו
+        # 'veterinary_care' / 'veterinary' / 'animal_hospital' ייכללו גם כשזוהה כלב/חתול
         animal_keywords = {
-            AnimalType.DOG: ["dog", "dogs", "כלב", "כלבים"],
-            AnimalType.CAT: ["cat", "cats", "חתול", "חתולים"], 
+            AnimalType.DOG: [
+                "dog", "dogs", "כלב", "כלבים",
+                "vet", "veterinary", "veterinary_care", "animal_hospital", "emergency_vet"
+            ],
+            AnimalType.CAT: [
+                "cat", "cats", "חתול", "חתולים",
+                "vet", "veterinary", "veterinary_care", "animal_hospital", "emergency_vet"
+            ], 
             AnimalType.BIRD: ["bird", "birds", "צפור", "צפורים"],
             AnimalType.WILDLIFE: ["wildlife", "wild", "חיות בר"],
         }
@@ -836,6 +862,63 @@ async def _generate_alert_message(
         "subject": subject,
         "template": template_name,
     }
+
+
+async def _notify_reporter_with_instructions(report: Report) -> None:
+    """Send reporter a concise guidance message + nearby vet clinics list."""
+    try:
+        from app.services.google import GoogleService
+    except Exception:
+        return
+    # Find nearby clinics regardless of alert routing policy
+    clinics: List[Dict[str, Any]] = []
+    try:
+        if report.latitude and report.longitude:
+            google = GoogleService()
+            async with google:
+                clinics = await google.search_veterinary_nearby(
+                    (report.latitude, report.longitude), radius=15000, language=report.language or "he"
+                )
+    except Exception:
+        clinics = []
+
+    # Build guidance message in Hebrew (default)
+    lang = report.language or "he"
+    # Use i18n strings
+    from app.core.i18n import get_text
+    lines: List[str] = []
+    lines.append(get_text("reporter.instructions.header", lang))
+    lines.append("- " + get_text("reporter.instructions.line1", lang))
+    lines.append("- " + get_text("reporter.instructions.line2", lang))
+    if report.city:
+        lines.append("- " + get_text("reporter.instructions.area", lang).format(city=report.city))
+    lines.append("")
+    if clinics:
+        lines.append(get_text("reporter.instructions.vets_title", lang))
+        for c in clinics[:3]:
+            # Escape for Telegram HTML parse mode
+            name_raw = c.get("name") or "מרפאה"
+            addr_raw = c.get("address") or ""
+            phone_raw = c.get("phone") or ""
+            name = TelegramFormatter.escape_html(name_raw)
+            addr = TelegramFormatter.escape_html(addr_raw)
+            phone = TelegramFormatter.escape_html(phone_raw)
+            sep_phone = f" — {phone}" if phone else ""
+            lines.append(f"• {name} — {addr}{sep_phone}")
+    else:
+        lines.append(get_text("reporter.instructions.vets_fallback", lang))
+
+    text_message = "\n".join(lines)
+
+    # Send via Telegram DM if possible
+    try:
+        reporter = getattr(report, 'reporter', None)
+        chat_id = getattr(reporter, 'telegram_user_id', None)
+        if chat_id:
+            msg = TelegramMessage(chat_id=chat_id, text=text_message)
+            await telegram_alerts.send_message(msg)
+    except Exception:
+        pass
 
 
 @job("alerts", timeout="2m", retry=Retry(max=2, interval=60), connection=redis_queue_sync)

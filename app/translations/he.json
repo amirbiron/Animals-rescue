@@ -73,6 +73,13 @@
   "alert.new_report.subject": "דיווח הצלת בעלי חיים חדש",
   "alert.new_report.body": "התקבל דיווח הצלה חדש.",
 
+  "reporter.instructions.header": "ℹ️ הנחיות ראשוניות:",
+  "reporter.instructions.line1": "אם אפשר ובטוח, נסו להביא את החיה למרפאה קרובה",
+  "reporter.instructions.line2": "אם החיה פצועה קשה/מסוכנת – המתינו למחלץ, אל תסתכנו",
+  "reporter.instructions.area": "עיר/אזור: {city}",
+  "reporter.instructions.vets_title": "מרפאות קרובות:",
+  "reporter.instructions.vets_fallback": "לא נמצאו מרפאות קרובות כרגע. מומלץ לחפש 'וטרינר' במפות.",
+
   "alert.status_update.subject": "עדכון סטטוס: {status}",
 
   "language_select_title": "בחר שפה:",

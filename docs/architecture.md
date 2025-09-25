@@ -145,7 +145,10 @@ class ReportProcessor:
         matched_orgs = await self.match_organizations(analyzed)
         
         # 5. שליחת התראות
+        # התראות נשלחות לעמותות/מקלטים/קבוצות מתנדבים/רשות בלבד; מרפאות אינן מקבלות התראות
         await self.send_notifications(matched_orgs, analyzed)
+        # 6. הודעת הנחיות למדווח + רשימת מרפאות קרובות להגעה עצמאית
+        await self.notify_reporter_with_guidance(analyzed)
         
         # 6. שמירה ב-DB
         return await self.save_report(analyzed)
@@ -157,7 +160,7 @@ class ReportProcessor:
 stateDiagram-v2
     [*] --> NewReport: דיווח חדש
     NewReport --> FindOrgs: חיפוש ארגונים
-    FindOrgs --> SendPrimary: שליחה ראשונית
+    FindOrgs --> SendPrimary: שליחה לעמותות/מתנדבים/רשות
     
     SendPrimary --> WaitResponse: המתנה 2 דקות
     WaitResponse --> Acknowledged: אישור התקבל
@@ -255,7 +258,8 @@ sequenceDiagram
     Bot-->>User: "הדיווח התקבל"
     
     Queue->>Notifier: עיבוד התראה
-    Notifier->>Org: שליחת WhatsApp/SMS/Email
+    Notifier->>Org: שליחת WhatsApp/SMS/Email (ללא מרפאות)
+    Notifier->>Reporter: הנחיות ורשימת מרפאות קרובות
     Org-->>Notifier: אישור קבלה
     Notifier->>DB: עדכון סטטוס
     Notifier->>Bot: עדכון למשתמש
