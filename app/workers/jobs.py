@@ -765,6 +765,13 @@ async def _generate_alert_message(
                 if len(desc) > 180:
                     desc = desc[:177] + "…"
                 parts.append(f"{get_text('report.description', lang)}: {desc}")
+            # Reporter phone (optional)
+            try:
+                reporter_phone = getattr(getattr(report, 'reporter', None), 'phone', None)
+            except Exception:
+                reporter_phone = None
+            if reporter_phone:
+                parts.append(f"📞 {reporter_phone}")
             if city:
                 parts.append(f"{get_text('report.location', lang)}: {city}")
             if report.latitude and report.longitude:
