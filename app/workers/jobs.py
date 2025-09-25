@@ -800,6 +800,13 @@ async def _generate_alert_message(
                 lines.append(f"📍 {maps_url}")
             if reporter_display:
                 lines.append(f"👤 מדווח: {reporter_display}")
+            # טלפון ארגון (לא חובה; לרוב זה אותו מספר שמקבל את ההודעה)
+            try:
+                org_phone = getattr(organization, 'primary_phone', None)
+            except Exception:
+                org_phone = None
+            if org_phone:
+                lines.append(f"☎️ ארגון: {org_phone}")
 
             text_message = "\n".join(lines)
             return {"message": text_message, "subject": None, "template": "inline_text_multiline"}
