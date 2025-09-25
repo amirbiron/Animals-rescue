@@ -90,4 +90,11 @@
   "reject_organization": "رفض الطلب",
   "org_approved": "تمت الموافقة على {name} ✅",
   "org_rejected": "تم رفض طلب {name} ❌"
+,
+  "reporter.instructions.header": "ℹ️ إرشادات أولية:",
+  "reporter.instructions.line1": "إذا كان ذلك آمنًا، حاول نقل الحيوان إلى عيادة قريبة",
+  "reporter.instructions.line2": "إذا كان الحيوان مصابًا بشدة/خطرًا – انتظر المُنقذ ولا تُخاطر",
+  "reporter.instructions.area": "المدينة/المنطقة: {city}",
+  "reporter.instructions.vets_title": "عيادات قريبة:",
+  "reporter.instructions.vets_fallback": "لا توجد عيادات قريبة الآن. جرّب البحث عن 'طبيب بيطري' في الخرائط."
 }
