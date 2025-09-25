@@ -536,7 +536,7 @@ class GoogleService:
         language: str = "he"
     ) -> List[Dict[str, Any]]:
         """
-        Search for animal shelters and rescue organizations in a specific city.
+        Search for animal shelters, rescue organizations and volunteer groups in a specific city.
         """
         city_location = await self.geocode(city, language=language)
         if not city_location:
@@ -546,7 +546,13 @@ class GoogleService:
         search_terms = [
             f"animal shelter {city}",
             f"pet rescue {city}",
+            f"animal rescue {city}",
+            f"rescue group {city}",
+            f"volunteer animal rescue {city}",
             f"עמותת בעלי חיים {city}",
+            f"קבוצת חילוץ בעלי חיים {city}",
+            f"מתנדבי חילוץ בעלי חיים {city}",
+            f"מתנדבים בעלי חיים {city}",
             f"מקלט לבעלי חיים {city}",
         ]
         all_results: List[Dict[str, Any]] = []
@@ -564,9 +570,9 @@ class GoogleService:
                     if place_id and place_id not in seen_place_ids:
                         types = result.get("types", [])
                         name = (result.get("name") or "").lower()
-                        # Heuristics: shelter/rescue keywords or types
+                        # Heuristics: shelter/rescue/volunteer keywords or types
                         if (
-                            any(k in name for k in ["shelter", "rescue", "עמותה", "מקלט"]) or
+                            any(k in name for k in ["shelter", "rescue", "volunteer", "עמותה", "מקלט", "מתנדב", "מתנדבים", "חילוץ"]) or
                             any(t in types for t in ["animal_shelter"])
                         ):
                             all_results.append(result)

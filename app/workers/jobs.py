@@ -35,7 +35,7 @@ from app.services.google import GoogleService
 from app.services.serpapi import SerpAPIService
 from app.services.nlp import NLPService
 from app.services.email import EmailService
-from app.services.telegram_alerts import TelegramAlertsService
+from app.services.telegram_alerts import TelegramAlertsService, TelegramMessage
 from app.services.whatsapp import get_whatsapp_service
 from app.services.sms import get_sms_service
 from app.services.sms import _normalize_e164 as _normalize_phone_e164
@@ -260,6 +260,13 @@ async def _process_new_report_async(report_id: str) -> Dict[str, Any]:
                     results["alerts_created"] += 1
             
             results["steps_completed"].append("alerts_queued")
+
+        # Step 7: Send instructions to reporter with nearby clinics list
+        try:
+            await _notify_reporter_with_instructions(report)
+            results["steps_completed"].append("reporter_notified")
+        except Exception as e:
+            logger.warning("Reporter instructions send failed", error=str(e))
     
     logger.info(
         "Report processing completed",
@@ -855,6 +862,56 @@ async def _generate_alert_message(
         "subject": subject,
         "template": template_name,
     }
+
+
+async def _notify_reporter_with_instructions(report: Report) -> None:
+    """Send reporter a concise guidance message + nearby vet clinics list."""
+    try:
+        from app.services.google import GoogleService
+    except Exception:
+        return
+    # Find nearby clinics regardless of alert routing policy
+    clinics: List[Dict[str, Any]] = []
+    try:
+        if report.latitude and report.longitude:
+            google = GoogleService()
+            async with google:
+                clinics = await google.search_veterinary_nearby(
+                    (report.latitude, report.longitude), radius=15000, language=report.language or "he"
+                )
+    except Exception:
+        clinics = []
+
+    # Build guidance message in Hebrew (default)
+    lang = report.language or "he"
+    lines: List[str] = []
+    lines.append("ℹ️ הנחיות ראשוניות:")
+    lines.append("- אם אפשר ובטוח, נסו להביא את החיה למרפאה קרובה")
+    lines.append("- אם החיה פצועה קשה/מסוכנת – המתינו למחלץ, אל תסתכנו")
+    if report.city:
+        lines.append(f"- עיר/אזור: {report.city}")
+    lines.append("")
+    if clinics:
+        lines.append("מרפאות קרובות:")
+        for c in clinics[:3]:
+            name = c.get("name") or "מרפאה"
+            addr = c.get("address") or ""
+            phone = c.get("phone") or ""
+            lines.append(f"• {name} — {addr} {('— ' + phone) if phone else ''}")
+    else:
+        lines.append("לא נמצאו מרפאות קרובות כרגע. מומלץ לחפש 'וטרינר' במפות.")
+
+    text_message = "\n".join(lines)
+
+    # Send via Telegram DM if possible
+    try:
+        reporter = getattr(report, 'reporter', None)
+        chat_id = getattr(reporter, 'telegram_user_id', None)
+        if chat_id:
+            msg = TelegramMessage(chat_id=chat_id, text=text_message)
+            await telegram_alerts.send_message(msg)
+    except Exception:
+        pass
 
 
 @job("alerts", timeout="2m", retry=Retry(max=2, interval=60), connection=redis_queue_sync)
