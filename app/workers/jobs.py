@@ -1558,9 +1558,9 @@ def schedule_recurring_jobs():
         use_local_timezone=False
     )
     
-    # SerpAPI enrichment daily at 03:30
+    # SerpAPI enrichment weekly at 03:30 (was daily)
     scheduler.cron(
-        cron_string="30 3 * * *",  # Every day at 03:30
+        cron_string="30 3 * * 0",  # Every Sunday at 03:30
         func=enrich_org_contacts_with_serpapi,
         timeout="15m",
         use_local_timezone=False
