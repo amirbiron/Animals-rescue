@@ -16,6 +16,8 @@ from typing import Dict, List, Optional, Any, Callable
 import multiprocessing as mp
 from pathlib import Path
 import psutil
+import os
+import uuid as _uuid
 
 import redis
 import structlog
@@ -118,20 +120,26 @@ class ManagedWorker:
         signal.signal(signal.SIGTERM, signal_handler)
         signal.signal(signal.SIGINT, signal_handler)
     
-    def start(self):
-        """Start the worker process."""
+    def start(self, with_scheduler: bool = False):
+        """Start the worker process.
+
+        Args:
+            with_scheduler: Run RQ scheduler inside this worker process.
+        """
         if self.is_running:
             logger.warning(f"Worker {self.worker_id} is already running")
             return
         
         try:
             # Create RQ Worker
+            # Use a unique RQ worker name to avoid collisions on restarts
+            unique_suffix = f"{os.getpid()}-{_uuid.uuid4().hex[:6]}"
+            rq_worker_name = f"{self.worker_id}-{unique_suffix}"
             self.worker = Worker(
                 queues=self.queues,
                 connection=self.connection,
-                name=self.worker_id,
-                default_worker_ttl=WORKER_TIMEOUT,
-                default_job_timeout=JOB_TIMEOUT
+                name=rq_worker_name,
+                default_worker_ttl=WORKER_TIMEOUT
             )
             
             # Setup job lifecycle hooks
@@ -153,7 +161,7 @@ class ManagedWorker:
             
             # Run worker (blocks until stopped)
             self.worker.work(
-                with_scheduler=False,
+                with_scheduler=with_scheduler,
                 logging_level='INFO'
             )
             
@@ -177,8 +185,12 @@ class ManagedWorker:
         self.should_stop = True
         
         if self.worker:
-            # Send stop signal to worker
-            self.worker.request_stop(signum=signal.SIGTERM)
+            # Send stop signal to worker (RQ>=2.0 expects frame param)
+            try:
+                self.worker.request_stop(signal.SIGTERM, None)
+            except TypeError:
+                # Fallback for older RQ versions
+                self.worker.request_stop()
             
             # Wait for graceful shutdown
             start_time = time.time()
@@ -409,11 +421,12 @@ class WorkerManager:
         """Start all worker processes."""
         for i in range(WORKER_PROCESSES):
             worker_id = f"worker_{i+1}"
+            with_scheduler = (i == 0)
             
             # Create worker process
             process = mp.Process(
                 target=self._worker_process_target,
-                args=(worker_id, WORKER_QUEUES),
+                args=(worker_id, WORKER_QUEUES, with_scheduler),
                 name=f"RQWorker-{worker_id}"
             )
             
@@ -422,7 +435,7 @@ class WorkerManager:
             
             logger.info(f"Started worker process {worker_id} (PID: {process.pid})")
     
-    def _worker_process_target(self, worker_id: str, queues: List[str]):
+    def _worker_process_target(self, worker_id: str, queues: List[str], with_scheduler: bool = False):
         """Target function for worker processes."""
         try:
             # Create worker in subprocess
@@ -433,7 +446,7 @@ class WorkerManager:
             )
             
             # Start worker (blocks until stopped)
-            worker.start()
+            worker.start(with_scheduler=with_scheduler)
             
         except Exception as e:
             logger.error(f"Worker process {worker_id} failed", error=str(e))
@@ -469,6 +482,9 @@ class WorkerManager:
         try:
             current_time = datetime.utcnow()
             unhealthy_workers = []
+            # Grace period on startup: skip aggressive checks for initial heartbeats
+            uptime_seconds = (current_time - self.start_time).total_seconds()
+            in_grace_period = uptime_seconds < (HEARTBEAT_INTERVAL * 2)
             
             for worker_id, process in self.worker_processes.items():
                 # Check if process is alive
@@ -482,6 +498,9 @@ class WorkerManager:
                 try:
                     heartbeat_data = redis_queue_sync.get(heartbeat_key)
                     if not heartbeat_data:
+                        if in_grace_period and process.is_alive():
+                            # Allow some time for first heartbeat after startup
+                            continue
                         logger.warning(f"No heartbeat from worker {worker_id}")
                         unhealthy_workers.append(worker_id)
                 except Exception as e:
@@ -512,7 +531,7 @@ class WorkerManager:
             # Start new process
             new_process = mp.Process(
                 target=self._worker_process_target,
-                args=(worker_id, WORKER_QUEUES),
+                args=(worker_id, WORKER_QUEUES, worker_id == "worker_1"),
                 name=f"RQWorker-{worker_id}"
             )
             

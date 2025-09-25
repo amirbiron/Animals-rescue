@@ -108,6 +108,48 @@ nlp_service = NLPService()
 geocoding_service = GeocodingService()
 file_storage = FileStorageService()
 
+
+async def _maybe_prompt_reporter_phone(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    """If reporter has no phone, offer to add one (optional). Returns True if we prompted and will resume later."""
+    try:
+        db_user = await get_or_create_user(update.effective_user)
+        if getattr(db_user, "phone", None):
+            return False
+        lang = get_user_language(context)
+        keyboard = InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("כן, הוסף מספר", callback_data="reporter_phone_yes"),
+                InlineKeyboardButton("לא עכשיו", callback_data="reporter_phone_no"),
+            ]
+        ])
+        target = getattr(update, 'callback_query', None)
+        if target:
+            await target.edit_message_text("נרצה לצרף את מספר הטלפון שלך כדי שהארגון יוכל לחזור אליך?", reply_markup=keyboard)
+        else:
+            msg = getattr(update, 'message', None) or getattr(update, 'effective_message', None)
+            if msg is not None:
+                await msg.reply_text("נרצה לצרף את מספר הטלפון שלך כדי שהארגון יוכל לחזור אליך?", reply_markup=keyboard)
+        context.user_data["awaiting_reporter_phone_choice"] = True
+        return True
+    except Exception:
+        return False
+
+
+async def handle_reporter_phone_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    choice = query.data
+    if choice == "reporter_phone_yes":
+        context.user_data["awaiting_phone"] = True
+        await query.edit_message_text("אנא שלחו מספר טלפון בפורמט תקין (לדוגמה: 050-1234567)")
+        return ConversationHandler.END
+    # reporter_phone_no -> continue to submit
+    try:
+        await submit_report(update, context)
+    except Exception:
+        pass
+    return ConversationHandler.END
+
 # =============================================================================
 # User Management Utilities
 # =============================================================================
@@ -508,15 +550,16 @@ async def handle_delete_report(update: Update, context: ContextTypes.DEFAULT_TYP
         if report.status not in [ReportStatus.SUBMITTED, ReportStatus.PENDING]:
             await query.edit_message_text("לא ניתן למחוק דיווח לאחר שהטיפול החל.")
             return
-        report.status = ReportStatus.CLOSED
+        # Hard delete the report and its related records (files/alerts) via cascades
         try:
+            await session.delete(report)
             await session.commit()
         except Exception:
             await session.rollback()
             await query.edit_message_text(get_text("operation_failed", lang))
             return
 
-    await query.edit_message_text("הדיווח נמחק ✅")
+    await query.edit_message_text("הדיווח נמחק מהמסד ✅")
 
 
 # =============================================================================
@@ -1018,7 +1061,11 @@ async def handle_urgency_selection(update: Update, context: ContextTypes.DEFAULT
     
     # Update report draft
     context.user_data[USER_DATA_KEYS["report_draft"]]["urgency_level"] = urgency
-    
+
+    # Optional reporter phone prompt before submit
+    if await _maybe_prompt_reporter_phone(update, context):
+        return ConversationHandler.END
+
     return await submit_report(update, context)
 
 
@@ -1032,7 +1079,11 @@ async def handle_animal_type_selection(update: Update, context: ContextTypes.DEF
     
     # Update report draft
     context.user_data[USER_DATA_KEYS["report_draft"]]["animal_type"] = animal_type
-    
+
+    # Optional reporter phone prompt before submit
+    if await _maybe_prompt_reporter_phone(update, context):
+        return ConversationHandler.END
+
     return await submit_report(update, context)
 
 
@@ -4083,6 +4134,10 @@ def create_bot_application() -> Application:
     ))
     application.add_handler(CallbackQueryHandler(
         handle_contact_emergency, pattern="contact_emergency"
+    ))
+    # Optional reporter phone prompt in report flow
+    application.add_handler(CallbackQueryHandler(
+        handle_reporter_phone_choice, pattern="^reporter_phone_(yes|no)$"
     ))
     application.add_handler(CallbackQueryHandler(
         handle_settings_back, pattern="settings_back"
