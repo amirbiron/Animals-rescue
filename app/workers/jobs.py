@@ -285,6 +285,8 @@ async def _reconcile_alert_channels_async() -> Dict[str, int]:
             desired: list[str] = []
             if org.primary_phone:
                 desired.extend(["whatsapp", "sms"])  # prefer WhatsApp first
+            if org.email:
+                desired.append("email")
             if org.telegram_chat_id:
                 desired.append("telegram")
             # Remove duplicates preserving order
@@ -1227,7 +1229,7 @@ async def _sync_google_places_data_async() -> Dict[str, Any]:
         
         for org in organizations:
             try:
-                # Get updated place details
+                # Get updated place details (כולל טלפון/אתר/סוגים)
                 place_details = await google_service.get_place_details(
                     org.google_place_id
                 )
@@ -1235,18 +1237,44 @@ async def _sync_google_places_data_async() -> Dict[str, Any]:
                 if place_details:
                     # Update organization data
                     org.name = place_details.get("name", org.name)
-                    org.primary_phone = place_details.get("phone", org.primary_phone)
+                    # Normalize phone
+                    phone = place_details.get("phone") or org.primary_phone
+                    if phone:
+                        org.primary_phone = _normalize_phone_e164(phone)
                     org.website = place_details.get("website", org.website)
                     org.address = place_details.get("address", org.address)
                     # Normalize opening_hours
                     opening_hours = place_details.get("opening_hours") or place_details.get("hours")
                     if opening_hours:
                         org.operating_hours = opening_hours
+                    # specialties מה-"types"
+                    types = list(place_details.get("types", []) or [])
+                    spec: List[str] = []
+                    for t in types:
+                        t_low = (t or "").lower()
+                        if any(k in t_low for k in ["dog", "cat", "bird", "wild", "reptile", "vet", "shelter", "rescue", "hospital"]):
+                            spec.append(t_low)
+                    if spec:
+                        # מיזוג עם קיימים
+                        merged = sorted(list(set((org.specialties or []) + spec)))
+                        org.specialties = merged
                     
                     # Update location if needed
                     if place_details.get("latitude"):
                         org.latitude = place_details["latitude"]
                         org.longitude = place_details["longitude"]
+                    
+                    # עדכון ערוצי התראה לפי פרטי קשר קיימים
+                    desired: list[str] = []
+                    if org.primary_phone:
+                        desired.extend(["whatsapp", "sms"])  # עדיפות ל-WhatsApp
+                    if org.email:
+                        desired.append("email")
+                    if org.telegram_chat_id:
+                        desired.append("telegram")
+                    if desired:
+                        seen = set()
+                        org.alert_channels = [c for c in desired if not (c in seen or seen.add(c))]
                     
                     results["organizations_updated"] += 1
                 
@@ -1285,24 +1313,54 @@ async def _sync_google_places_data_async() -> Dict[str, Any]:
                     )
                     
                     if not existing_org.scalar_one_or_none():
-                        # Create new organization
+                        # Create new organization with best-effort enrichment
+                        raw_phone = place.get("phone") or None
+                        norm_phone = _normalize_phone_e164(raw_phone) if raw_phone else None
+                        org_type = (
+                            OrganizationType.ANIMAL_SHELTER
+                            if any(k in (place.get("name") or "").lower() for k in ["shelter", "rescue", "עמותה", "מקלט"]) else
+                            OrganizationType.VET_CLINIC
+                        )
                         new_org = Organization(
                             name=place["name"],
-                            organization_type=(
-                                OrganizationType.ANIMAL_SHELTER
-                                if any(k in (place.get("name") or "").lower() for k in ["shelter", "rescue", "עמותה", "מקלט"]) else
-                                OrganizationType.VET_CLINIC
-                            ),
-                            primary_phone=place.get("phone"),
+                            organization_type=org_type,
+                            primary_phone=norm_phone,
                             address=place.get("address"),
                             city=city,
                             latitude=place.get("latitude"),
                             longitude=place.get("longitude"),
                             google_place_id=place["place_id"],
                             is_active=True,
-                            is_verified=False,  # Require manual verification
+                            is_verified=False,
                         )
-                        
+                        # specialties: מהסוגים של גוגל + סוג ארגון בסיסי
+                        types = list(place.get("types", []) or [])
+                        specialties: List[str] = []
+                        for t in types:
+                            t_low = (t or "").lower()
+                            if any(k in t_low for k in ["dog", "cat", "bird", "wild", "reptile", "vet", "shelter", "rescue", "hospital"]):
+                                specialties.append(t_low)
+                        # הוספת קטגוריה נגזרת
+                        if org_type == OrganizationType.VET_CLINIC:
+                            specialties.append("veterinary")
+                        if org_type == OrganizationType.ANIMAL_SHELTER:
+                            specialties.append("shelter")
+                        # ייחודיות
+                        if specialties:
+                            new_org.specialties = sorted(list(set(specialties)))
+                        # ערוצי התרעה לפי פרטים שיש
+                        channels: List[str] = []
+                        if norm_phone:
+                            channels.extend(["whatsapp", "sms"])
+                        if place.get("website"):
+                            # אין לנו מייל בשלב החיפוש, נשאיר לאימות/SerpAPI
+                            pass
+                        # תמיד נוסיף טלגרם רק אם קיים chat id (לא קיים פה)
+                        if channels:
+                            # ייחודיות תוך שמירה על סדר
+                            seen = set()
+                            new_org.alert_channels = [c for c in channels if not (c in seen or seen.add(c))]
+
                         session.add(new_org)
                         results["new_organizations_found"] += 1
                 
