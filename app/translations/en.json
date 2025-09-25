@@ -86,6 +86,13 @@
   "org_type_emergency_vet": "Emergency vet (24/7)",
   "org_type_animal_hospital": "Animal hospital",
   "org_type_animal_shelter": "Animal shelter",
+
+  "reporter.instructions.header": "ℹ️ Initial guidance:",
+  "reporter.instructions.line1": "If it's safe, try to bring the animal to a nearby clinic",
+  "reporter.instructions.line2": "If the animal is severely injured/dangerous – wait for a rescuer",
+  "reporter.instructions.area": "City/Area: {city}",
+  "reporter.instructions.vets_title": "Nearby clinics:",
+  "reporter.instructions.vets_fallback": "No nearby clinics found right now. Try searching 'veterinarian' on maps.",
   "org_type_rescue_org": "Rescue organization",
   "org_type_government": "Municipal/government",
   "org_type_volunteer_group": "Volunteer group",
