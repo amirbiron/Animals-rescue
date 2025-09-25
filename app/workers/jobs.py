@@ -808,12 +808,7 @@ async def _generate_alert_message(
                 org_phone = getattr(organization, 'primary_phone', None)
             except Exception:
                 org_phone = None
-            if org_phone:
-                try:
-                    org_phone_norm = _normalize_phone_e164(org_phone)
-                except Exception:
-                    org_phone_norm = org_phone
-                lines.append(f"☎️ ארגון: {org_phone_norm}")
+            # לא מציגים טלפון של הארגון למקבל ההודעה
 
             text_message = "\n".join(lines)
             return {"message": text_message, "subject": None, "template": "inline_text_multiline"}
