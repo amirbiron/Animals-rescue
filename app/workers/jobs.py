@@ -380,9 +380,17 @@ async def _find_organizations_by_type(
             conditions.append(Organization.city.ilike(f"%{city}%"))
         
         # Add specialty filter
+        # הוספת מילות מפתח כלליות לווטרינרים מבטיחה שארגונים עם תגיות כמו
+        # 'veterinary_care' / 'veterinary' / 'animal_hospital' ייכללו גם כשזוהה כלב/חתול
         animal_keywords = {
-            AnimalType.DOG: ["dog", "dogs", "כלב", "כלבים"],
-            AnimalType.CAT: ["cat", "cats", "חתול", "חתולים"], 
+            AnimalType.DOG: [
+                "dog", "dogs", "כלב", "כלבים",
+                "vet", "veterinary", "veterinary_care", "animal_hospital", "emergency_vet"
+            ],
+            AnimalType.CAT: [
+                "cat", "cats", "חתול", "חתולים",
+                "vet", "veterinary", "veterinary_care", "animal_hospital", "emergency_vet"
+            ], 
             AnimalType.BIRD: ["bird", "birds", "צפור", "צפורים"],
             AnimalType.WILDLIFE: ["wildlife", "wild", "חיות בר"],
         }
