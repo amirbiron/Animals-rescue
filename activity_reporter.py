@@ -1,11 +1,8 @@
-"""
-קובץ פשוט לדיווח פעילות - העתק את הקובץ הזה לכל בוט
-"""
 from pymongo import MongoClient
 from datetime import datetime, timezone
 
 class SimpleActivityReporter:
-    def init(self, mongodb_uri, service_id, service_name=None):
+    def __init__(self, mongodb_uri, service_id, service_name=None):
         """
         mongodb_uri: חיבור למונגו (אותו מהבוט המרכזי)
         service_id: מזהה השירות ב-Render
@@ -62,6 +59,7 @@ class SimpleActivityReporter:
         except Exception:
             # שקט - אל תיכשל את הבוט אם יש בעיה
             pass
+
 
 # דוגמה לשימוש קל
 def create_reporter(mongodb_uri, service_id, service_name=None):
