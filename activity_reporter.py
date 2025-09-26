@@ -1,73 +1,69 @@
 """
-Minimal activity reporter shim used by the Telegram webhook to log user activity.
-
-This vendor module provides a simple `create_reporter` factory that returns an
-object with a `report_activity(user_id)` method. It writes documents to MongoDB
-using the provided connection string. Failures are logged and never raise.
+קובץ פשוט לדיווח פעילות - העתק את הקובץ הזה לכל בוט
 """
-
-from __future__ import annotations
-
-import os
+from pymongo import MongoClient
 from datetime import datetime, timezone
-from typing import Optional
 
-import structlog
-
-try:
-    from pymongo import MongoClient
-    from pymongo.collection import Collection
-    from pymongo.errors import PyMongoError
-except Exception:  # pragma: no cover
-    # Lazy import errors handled later in runtime calls
-    MongoClient = None  # type: ignore
-    Collection = None  # type: ignore
-    PyMongoError = Exception  # type: ignore
-
-
-logger = structlog.get_logger(__name__)
-
-
-class _ActivityReporter:
-    def __init__(self, mongodb_uri: str, service_id: str, service_name: str) -> None:
-        self._mongodb_uri = mongodb_uri
-        self._service_id = service_id
-        self._service_name = service_name
-        self._collection: Optional[Collection] = None
-
-    def _ensure_connection(self) -> None:
-        if self._collection is not None:
-            return
-        if MongoClient is None:  # pymongo not installed
-            raise RuntimeError("pymongo is not installed")
-
-        db_name = os.getenv("ACTIVITY_REPORTER_DB_NAME", "activity")
-        collection_name = os.getenv("ACTIVITY_REPORTER_COLLECTION", "user_activity")
-
-        client = MongoClient(self._mongodb_uri, serverSelectionTimeoutMS=2000)
-        db = client.get_database(db_name)
-        self._collection = db.get_collection(collection_name)
-
-    def report_activity(self, user_id: int | str | None) -> None:
-        if not user_id:
-            return
+class SimpleActivityReporter:
+    def init(self, mongodb_uri, service_id, service_name=None):
+        """
+        mongodb_uri: חיבור למונגו (אותו מהבוט המרכזי)
+        service_id: מזהה השירות ב-Render
+        service_name: שם הבוט (אופציונלי)
+        """
         try:
-            self._ensure_connection()
-            if not self._collection:
-                return
-            doc = {
-                "user_id": str(user_id),
-                "service_id": self._service_id,
-                "service_name": self._service_name,
-                "timestamp": datetime.now(timezone.utc),
-            }
-            self._collection.insert_one(doc)
-        except PyMongoError as e:  # type: ignore
-            logger.warning("activity_reporter.mongo_error", error=str(e))
-        except Exception as e:  # pragma: no cover
-            logger.warning("activity_reporter.error", error=str(e))
+            self.client = MongoClient(mongodb_uri)
+            self.db = self.client["render_bot_monitor"]
+            self.service_id = service_id
+            self.service_name = service_name or service_id
+            self.connected = True
+        except Exception:
+            self.connected = False
+            print("⚠️ לא ניתן להתחבר למונגו - פעילות לא תירשם")
 
+    def report_activity(self, user_id):
+        """דיווח פעילות פשוט"""
+        if not self.connected:
+            return
 
-def create_reporter(*, mongodb_uri: str, service_id: str, service_name: str) -> _ActivityReporter:
-    return _ActivityReporter(mongodb_uri=mongodb_uri, service_id=service_id, service_name=service_name)
+        try:
+            now = datetime.now(timezone.utc)
 
+            # עדכון אינטראקציית המשתמש
+            self.db.user_interactions.update_one(
+                {"service_id": self.service_id, "user_id": user_id},
+                {
+                    "$set": {"last_interaction": now},
+                    "$inc": {"interaction_count": 1},
+                    "$setOnInsert": {"created_at": now}
+                },
+                upsert=True
+            )
+
+            # עדכון פעילות השירות
+            self.db.service_activity.update_one(
+                {"_id": self.service_id},
+                {
+                    "$set": {
+                        "last_user_activity": now,
+                        "service_name": self.service_name,
+                        "updated_at": now
+                    },
+                    "$setOnInsert": {
+                        "created_at": now,
+                        "status": "active",
+                        "total_users": 0,
+                        "suspend_count": 0
+                    }
+                },
+                upsert=True
+            )
+
+        except Exception:
+            # שקט - אל תיכשל את הבוט אם יש בעיה
+            pass
+
+# דוגמה לשימוש קל
+def create_reporter(mongodb_uri, service_id, service_name=None):
+    """יצירת reporter פשוט"""
+    return SimpleActivityReporter(mongodb_uri, service_id, service_name)
