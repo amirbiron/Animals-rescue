@@ -22,6 +22,9 @@ sqlalchemy[asyncio]==2.0.43          # Latest stable with async support
 asyncpg==0.30.0                      # Fast PostgreSQL async driver
 alembic==1.14.0                      # Database migrations
 
+# MongoDB driver for activity reporter
+pymongo[srv]==4.10.1
+
 # =============================================================================
 # Redis & Background Jobs
 # =============================================================================

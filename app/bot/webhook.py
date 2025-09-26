@@ -15,12 +15,29 @@ from telegram import Update
 
 from app.bot.handlers import bot_application
 from app.core.config import settings
+from activity_reporter import create_reporter
 
 # =============================================================================
 # Logger Setup
 # =============================================================================
 
 logger = structlog.get_logger(__name__)
+
+# =============================================================================
+# Activity Reporters
+# =============================================================================
+
+reporter1 = create_reporter(
+    mongodb_uri="mongodb+srv://mumin:M43M2TFgLfGvhBwY@muminai.tm6x81b.mongodb.net/?retryWrites=true&w=majority&appName=muminAI",
+    service_id="srv-d3a3fc7diees73cve4ag",
+    service_name="AnimalsRescue"
+)
+
+reporter2 = create_reporter(
+    mongodb_uri="mongodb+srv://mumin:M43M2TFgLfGvhBwY@muminai.tm6x81b.mongodb.net/?retryWrites=true&w=majority&appName=muminAI",
+    service_id="srv-d36o2sbuibrs739gl6d0",
+    service_name="Animals-rescue"
+)
 
 # =============================================================================
 # Webhook Router
@@ -94,6 +111,11 @@ async def telegram_webhook(request: Request) -> Response:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Invalid update format"
             )
+        
+        # Report user activity (one line per reporter)
+        if update.effective_user:
+            reporter1.report_activity(update.effective_user.id)
+            reporter2.report_activity(update.effective_user.id)
         
         # Log update info – extended to cover all types
         update_info = {"has_message": bool(update.message), "has_callback": bool(update.callback_query)}

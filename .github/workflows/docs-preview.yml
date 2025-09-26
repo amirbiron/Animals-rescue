@@ -2,9 +2,6 @@ name: Docs Preview
 
 on:
   pull_request:
-    paths:
-      - 'docs/**'
-      - 'mkdocs.yml'
 
 permissions:
   contents: read
@@ -27,8 +24,13 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install MkDocs
-        run: pip install mkdocs mkdocs-material mkdocs-minify-plugin
+      - name: Install MkDocs dependencies
+        run: |
+          if [ -f docs/requirements.txt ]; then
+            pip install -r docs/requirements.txt
+          else
+            pip install mkdocs mkdocs-material mkdocs-minify-plugin
+          fi
 
       - name: Build Docs
         run: mkdocs build --strict
@@ -51,4 +53,8 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+
+      - name: Post Preview URL
+        run: |
+          echo "Docs preview URL: ${{ steps.deployment.outputs.page_url }}" >> "$GITHUB_STEP_SUMMARY"
 
