@@ -362,6 +362,15 @@ class GoogleService:
                             v = details.get(k)
                             if v and not merged.get(k):
                                 merged[k] = v
+                        # Filter: prefer mobile numbers for SMS/WhatsApp. If phone seems landline, try to drop it.
+                        try:
+                            from app.services.sms import is_israeli_mobile  # local import to avoid cycles
+                            ph = merged.get("phone")
+                            if ph and not is_israeli_mobile(ph):
+                                # keep website but drop landline phone to force later enrichment or manual update
+                                merged.pop("phone", None)
+                        except Exception:
+                            pass
                         return merged
                 except Exception:
                     pass

@@ -2719,8 +2719,13 @@ async def handle_admin_import_location_inputs(update: Update, context: ContextTy
                         continue
                     org_type = classify_org_type_from_place(place)
                     channels = []
-                    if place.get("phone"):
-                        channels = ["whatsapp", "sms"]
+                    # Set channels only if mobile phone (for SMS/WhatsApp)
+                    try:
+                        from app.services.sms import is_israeli_mobile  # local import
+                        if place.get("phone") and is_israeli_mobile(place.get("phone")):
+                            channels = ["whatsapp", "sms"]
+                    except Exception:
+                        pass
                     org = Organization(
                         name=place["name"],
                         organization_type=org_type,
@@ -2955,8 +2960,12 @@ async def handle_admin_import_cities_run(update: Update, context: ContextTypes.D
                                     continue
                                 org_type = classify_org_type_from_place(place)
                                 channels = []
-                                if place.get("phone"):
-                                    channels = ["whatsapp", "sms"]
+                                try:
+                                    from app.services.sms import is_israeli_mobile
+                                    if place.get("phone") and is_israeli_mobile(place.get("phone")):
+                                        channels = ["whatsapp", "sms"]
+                                except Exception:
+                                    pass
                                 org = Organization(
                                     name=place.get("name"),
                                     organization_type=org_type,

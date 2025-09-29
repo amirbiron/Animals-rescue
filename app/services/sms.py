@@ -31,6 +31,38 @@ def _normalize_e164(phone: str) -> str:
     return phone
 
 
+def is_israeli_mobile(phone: str) -> bool:
+    """Heuristic check whether a phone is an Israeli mobile number.
+
+    Rules:
+    - Normalize to E.164 first.
+    - Accept numbers starting with +9725 (cellular ranges) or local '05'.
+    - Reject typical landline area codes like +9722/+9723/+9724/+9728/+9729 and '02/03/04/08/09'.
+    """
+    if not phone:
+        return False
+    p = _normalize_e164(phone)
+    # Strip spaces/dashes
+    p = p.replace(" ", "").replace("-", "")
+    if p.startswith("+9725"):
+        return True
+    if p.startswith("05"):
+        return True
+    # Explicitly reject common landline prefixes
+    if p.startswith("+9722") or p.startswith("02"):
+        return False
+    if p.startswith("+9723") or p.startswith("03"):
+        return False
+    if p.startswith("+9724") or p.startswith("04"):
+        return False
+    if p.startswith("+9728") or p.startswith("08"):
+        return False
+    if p.startswith("+9729") or p.startswith("09"):
+        return False
+    # Default conservative: not clearly mobile
+    return False
+
+
 @dataclass
 class SmsResult:
     status: str
