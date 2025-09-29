@@ -26,6 +26,7 @@ from app.models.database import async_session_maker, Organization
 from app.services.google import GoogleService
 from app.services.serpapi import SerpAPIService
 from app.services.sms import _normalize_e164 as _normalize_phone_e164
+from app.services.sms import is_israeli_mobile
 
 
 logger = structlog.get_logger(__name__).bind(component="sync_contacts_limited")
@@ -115,7 +116,7 @@ async def _process(limit: int) -> dict:
 
                 # 3) Recompute alert channels for this org
                 desired: List[str] = []
-                if org.primary_phone:
+                if org.primary_phone and is_israeli_mobile(org.primary_phone):
                     desired.extend(["whatsapp", "sms"])
                 if org.email:
                     desired.append("email")
