@@ -2750,6 +2750,12 @@ async def handle_admin_import_location_inputs(update: Update, context: ContextTy
             f"ייבוא לפי מיקום הושלם. נוספו {created} ארגונים חדשים ברדיוס {int(radius/1000)} ק""מ.",
             reply_markup=ReplyKeyboardRemove()
         )
+        try:
+            from app.workers.jobs import enrich_org_contacts_with_serpapi, reconcile_alert_channels  # type: ignore
+            enqueue_or_run(enrich_org_contacts_with_serpapi)
+            enqueue_or_run(reconcile_alert_channels)
+        except Exception:
+            pass
         return ConversationHandler.END
 
     # If we got here, input wasn't a known radius or a location – keep waiting in the same state
@@ -2836,6 +2842,13 @@ async def handle_admin_import_google_input(update: Update, context: ContextTypes
         context.user_data.pop("awaiting_google_city", None)
         logger.info("import_google_city_completed", city=city, created=created)
         await update.message.reply_text(f"ייבוא מגוגל הושלם. נוספו {created} ארגונים חדשים בעיר {city}.")
+        try:
+            # Trigger background enrichment (SerpAPI) and alert channels reconcile
+            from app.workers.jobs import enrich_org_contacts_with_serpapi, reconcile_alert_channels  # type: ignore
+            enqueue_or_run(enrich_org_contacts_with_serpapi)
+            enqueue_or_run(reconcile_alert_channels)
+        except Exception:
+            pass
         return ConversationHandler.END
 
 
@@ -2974,6 +2987,12 @@ async def handle_admin_import_cities_run(update: Update, context: ContextTypes.D
 
     summary_lines = ["ייבוא הושלם", f"סה\"כ ארגונים שנוספו: {total_created}"] + per_city_summary
     await query.edit_message_text("\n".join(summary_lines))
+    try:
+        from app.workers.jobs import enrich_org_contacts_with_serpapi, reconcile_alert_channels  # type: ignore
+        enqueue_or_run(enrich_org_contacts_with_serpapi)
+        enqueue_or_run(reconcile_alert_channels)
+    except Exception:
+        pass
 
 
 async def handle_admin_import_cities_inputs(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
