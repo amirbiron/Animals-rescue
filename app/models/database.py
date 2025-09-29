@@ -744,7 +744,7 @@ class Organization(Base, UUIDMixin, TimestampMixin):
     # Alert preferences
     alert_channels: Mapped[List[str]] = mapped_column(
         ARRAY(String),
-        default=["telegram", "email"],
+        default=list,
         doc="Preferred alert channels"
     )
     

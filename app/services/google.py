@@ -331,6 +331,46 @@ class GoogleService:
             
             raise ExternalServiceError(f"Google Places API request failed: {e}")
     
+    async def _enrich_places_details(
+        self,
+        places: List[Dict[str, Any]],
+        language: str = "he",
+        concurrency: int = 5,
+    ) -> List[Dict[str, Any]]:
+        """Enrich a list of Places with phone/website by calling Place Details for missing fields.
+
+        Only calls details for items missing phone/website. Uses a small concurrency limit and relies on caching.
+        """
+        if not places:
+            return places
+
+        sem = asyncio.Semaphore(concurrency)
+        enriched: List[Dict[str, Any]] = []
+
+        async def _enrich_one(item: Dict[str, Any]) -> Dict[str, Any]:
+            phone_missing = not item.get("phone")
+            website_missing = not item.get("website")
+            place_id = item.get("place_id")
+            if not place_id or not (phone_missing or website_missing):
+                return item
+            async with sem:
+                try:
+                    details = await self.get_place_details(place_id, language=language)
+                    if details:
+                        merged = item.copy()
+                        for k in ("phone", "website", "opening_hours", "types"):
+                            v = details.get(k)
+                            if v and not merged.get(k):
+                                merged[k] = v
+                        return merged
+                except Exception:
+                    pass
+                return item
+
+        tasks = [_enrich_one(p) for p in places]
+        enriched = await asyncio.gather(*tasks)
+        return list(enriched)
+
     def _process_place_result(self, result: Dict[str, Any]) -> Dict[str, Any]:
         """Process a single place result from Google Places API."""
         geometry = result.get("geometry", {})
@@ -526,7 +566,7 @@ class GoogleService:
             city=city,
             total_results=len(all_results)
         )
-        
+        all_results = await self._enrich_places_details(all_results, language=language)
         return all_results
 
     async def search_animal_shelters(
@@ -602,6 +642,7 @@ class GoogleService:
                 logger.warning("Shelter search failed for term", term=term, error=str(e))
                 continue
         logger.info("Animal shelters search completed", city=city, total_results=len(all_results))
+        all_results = await self._enrich_places_details(all_results, language=language)
         return all_results
 
     async def search_veterinary_nearby(
@@ -636,6 +677,7 @@ class GoogleService:
             except Exception as e:
                 logger.warning("Veterinary nearby search failed", error=str(e))
                 continue
+        all_results = await self._enrich_places_details(all_results, language=language)
         return all_results
 
     async def search_shelters_nearby(
@@ -669,6 +711,7 @@ class GoogleService:
             except Exception as e:
                 logger.warning("Shelter nearby search failed", error=str(e))
                 continue
+        all_results = await self._enrich_places_details(all_results, language=language)
         return all_results
     
     # =========================================================================

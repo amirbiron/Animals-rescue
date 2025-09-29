@@ -2718,6 +2718,9 @@ async def handle_admin_import_location_inputs(update: Update, context: ContextTy
                     if exists.scalar_one_or_none():
                         continue
                     org_type = classify_org_type_from_place(place)
+                    channels = []
+                    if place.get("phone"):
+                        channels = ["whatsapp", "sms"]
                     org = Organization(
                         name=place["name"],
                         organization_type=org_type,
@@ -2729,6 +2732,7 @@ async def handle_admin_import_location_inputs(update: Update, context: ContextTy
                         google_place_id=place["place_id"],
                         is_active=True,
                         is_verified=False,
+                        alert_channels=channels,
                     )
                     session.add(org)
                     created += 1
@@ -2937,6 +2941,9 @@ async def handle_admin_import_cities_run(update: Update, context: ContextTypes.D
                                 if exists_q.scalar_one_or_none():
                                     continue
                                 org_type = classify_org_type_from_place(place)
+                                channels = []
+                                if place.get("phone"):
+                                    channels = ["whatsapp", "sms"]
                                 org = Organization(
                                     name=place.get("name"),
                                     organization_type=org_type,
@@ -2948,6 +2955,7 @@ async def handle_admin_import_cities_run(update: Update, context: ContextTypes.D
                                     google_place_id=place.get("place_id"),
                                     is_active=True,
                                     is_verified=False,
+                                    alert_channels=channels,
                                 )
                                 session.add(org)
                                 created_here += 1
