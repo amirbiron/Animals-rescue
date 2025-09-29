@@ -333,6 +333,8 @@ class Settings(BaseSettings):
     ENABLE_WORKERS: bool = Field(default=False, description="Enable RQ workers (separate service recommended)")
     WORKER_PROCESSES: int = Field(default=2, description="Number of worker processes")
     WORKER_TIMEOUT: int = Field(default=300, description="Worker job timeout in seconds")
+    # If true, start workers inside the web app process (not recommended in production)
+    START_WORKERS_IN_APP: bool = Field(default=False, description="Start RQ workers inside the web app (use only for dev)")
     
     # Job retry configuration
     JOB_MAX_RETRIES: int = Field(default=3)
