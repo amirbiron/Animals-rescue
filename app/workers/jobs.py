@@ -736,14 +736,29 @@ async def _send_organization_alert_async(
                         if current_index + 1 < len(channels):
                             next_channel = channels[current_index + 1]
                             # Queue next channel immediately
-                            if settings.ENABLE_WORKERS:
-                                send_organization_alert.delay(
-                                    str(report.id), str(organization.id), next_channel
+                            # Avoid duplicate escalation if a queued alert for next_channel already exists
+                            try:
+                                existing_next = await session.execute(
+                                    select(Alert).where(
+                                        and_(
+                                            Alert.report_id == report.id,
+                                            Alert.organization_id == organization.id,
+                                            Alert.channel == AlertChannel(next_channel),
+                                            Alert.status.in_([AlertStatus.QUEUED, AlertStatus.SENDING])
+                                        )
+                                    )
                                 )
-                            else:
-                                asyncio.create_task(_send_organization_alert_async(
-                                    str(report.id), str(organization.id), next_channel
-                                ))
+                                if existing_next.scalar_one_or_none() is None:
+                                    if settings.ENABLE_WORKERS:
+                                        send_organization_alert.delay(
+                                            str(report.id), str(organization.id), next_channel
+                                        )
+                                    else:
+                                        asyncio.create_task(_send_organization_alert_async(
+                                            str(report.id), str(organization.id), next_channel
+                                        ))
+                            except Exception as _dup_e:
+                                logger.warning("Duplicate escalation check failed", error=str(_dup_e))
                 except Exception as _e:
                     logger.warning("Escalation scheduling failed", error=str(_e))
 
@@ -854,18 +869,24 @@ async def _generate_alert_message(
             # שם משתמש או טלפון של המדווח
             reporter_username = None
             reporter_phone = None
+            reporter_telegram_id = None
             try:
                 reporter = getattr(report, 'reporter', None)
                 reporter_username = getattr(reporter, 'username', None)
                 reporter_phone = getattr(reporter, 'phone', None)
+                reporter_telegram_id = getattr(reporter, 'telegram_user_id', None)
             except Exception:
                 pass
 
             reporter_display = None
             if reporter_username:
-                reporter_display = f"@{reporter_username}"
+                # Prefer Telegram clickable link when possible
+                if reporter_telegram_id:
+                    reporter_display = f"טלגרם: <a href=\"https://t.me/{reporter_username}\">@{reporter_username}</a>"
+                else:
+                    reporter_display = f"טלגרם: @{reporter_username}"
             elif reporter_phone:
-                reporter_display = reporter_phone
+                reporter_display = f"טלפון: {reporter_phone}"
 
             # עיר וקישור מפה
             city = report.city or ""

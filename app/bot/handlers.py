@@ -984,6 +984,9 @@ async def handle_report_confirmation(update: Update, context: ContextTypes.DEFAU
     action = query.data
     
     if action == "confirm_analysis":
+        # Optional reporter phone prompt before final submit (in case לא נשאל מוקדם יותר)
+        if await _maybe_prompt_reporter_phone(update, context):
+            return ConversationHandler.END
         return await submit_report(update, context)
     elif action == "modify_urgency":
         return await show_urgency_selection(update, context)
