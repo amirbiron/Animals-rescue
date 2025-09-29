@@ -48,6 +48,12 @@ jobs:
         uses: actions/deploy-pages@v4
         with:
           preview: true
-      - name: Summary
-        run: echo "Docs preview will appear under this PR's Checks → Deployments."
+      - name: Post Preview URL to Summary
+        if: always()
+        run: |
+          if [ -n "${{ steps.deployment.outputs.page_url }}" ]; then
+            echo "Docs preview URL: ${{ steps.deployment.outputs.page_url }}" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Docs preview will appear under this PR's Checks → Deployments." >> "$GITHUB_STEP_SUMMARY"
+          fi
 
