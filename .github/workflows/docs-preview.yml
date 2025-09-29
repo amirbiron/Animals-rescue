@@ -42,14 +42,12 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/configure-pages@v5
-
       - id: deployment
         uses: actions/deploy-pages@v4
         with:
           preview: true
-
-      - run: echo "Docs preview URL: ${{ steps.deployment.outputs.page_url }}" >> "$GITHUB_STEP_SUMMARY"
+      - name: Summary
+        run: echo "Docs preview will appear under this PR's Checks → Deployments."
 
