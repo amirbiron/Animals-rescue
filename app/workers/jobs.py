@@ -309,8 +309,13 @@ async def _reconcile_alert_channels_async() -> Dict[str, int]:
         for org in orgs:
             results["processed"] += 1
             desired: list[str] = []
-            if org.primary_phone:
-                desired.extend(["whatsapp", "sms"])  # prefer WhatsApp first
+            try:
+                from app.services.sms import is_israeli_mobile
+                if org.primary_phone and is_israeli_mobile(org.primary_phone):
+                    desired.extend(["whatsapp", "sms"])  # prefer WhatsApp first
+            except Exception:
+                # If validation fails, avoid adding phone-based channels
+                pass
             if org.email and getattr(settings, "ENABLE_EMAIL_ALERTS", False):
                 desired.append("email")
             if org.telegram_chat_id:
@@ -320,7 +325,7 @@ async def _reconcile_alert_channels_async() -> Dict[str, int]:
             desired_unique = [c for c in desired if not (c in seen or seen.add(c))]
             current = list(org.alert_channels or [])
             if desired_unique != current:
-                org.alert_channels = desired_unique or current
+                org.alert_channels = desired_unique
                 results["updated"] += 1
         await session.commit()
     logger.info("reconcile_alert_channels completed", **results)

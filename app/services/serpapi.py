@@ -63,15 +63,25 @@ class SerpAPIService:
                 return None
 
             # בחר תוצאה ראשונה כמתאימה ביותר
-            place = places[0]
+            # Prefer mobile phone if possible
+            from app.services.sms import is_israeli_mobile  # local import to avoid global dep
+            selected = places[0]
+            phone = selected.get("phone") or selected.get("extension")
+            if not (phone and is_israeli_mobile(phone)):
+                for p in places:
+                    ph = p.get("phone") or p.get("extension")
+                    if ph and is_israeli_mobile(ph):
+                        selected = p
+                        phone = ph
+                        break
             return {
-                "name": place.get("title") or place.get("name"),
-                "phone": place.get("phone") or place.get("extension"),
-                "website": place.get("website"),
-                "address": place.get("address"),
-                "place_id": place.get("place_id"),
-                "rating": place.get("rating"),
-                "types": place.get("type"),
+                "name": selected.get("title") or selected.get("name"),
+                "phone": phone,
+                "website": selected.get("website"),
+                "address": selected.get("address"),
+                "place_id": selected.get("place_id"),
+                "rating": selected.get("rating"),
+                "types": selected.get("type"),
             }
         except Exception as e:
             logger.error("SerpAPI search failed", error=str(e))
@@ -97,9 +107,13 @@ class SerpAPIService:
             place = data.get("place_results") or {}
             if not place:
                 return None
+            from app.services.sms import is_israeli_mobile
+            phone = place.get("phone")
+            if phone and not is_israeli_mobile(phone):
+                phone = None
             return {
                 "name": place.get("title") or place.get("name"),
-                "phone": place.get("phone"),
+                "phone": phone,
                 "website": place.get("website"),
                 "address": place.get("address"),
                 "place_id": place_id,
