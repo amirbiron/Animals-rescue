@@ -246,6 +246,14 @@ async def _process_new_report_async(report_id: str) -> Dict[str, Any]:
             for org in organizations:
                 # Create alert jobs for each channel
                 for channel in org.alert_channels:
+                    # Skip email alerts when feature is disabled
+                    if channel == "email" and not getattr(settings, "ENABLE_EMAIL_ALERTS", False):
+                        logger.info(
+                            "Skipping email alert (feature disabled)",
+                            report_id=report_id,
+                            organization_id=str(org.id)
+                        )
+                        continue
                     if settings.ENABLE_WORKERS:
                         send_organization_alert.delay(
                             report_id=report_id,
@@ -303,7 +311,7 @@ async def _reconcile_alert_channels_async() -> Dict[str, int]:
             desired: list[str] = []
             if org.primary_phone:
                 desired.extend(["whatsapp", "sms"])  # prefer WhatsApp first
-            if org.email:
+            if org.email and getattr(settings, "ENABLE_EMAIL_ALERTS", False):
                 desired.append("email")
             if org.telegram_chat_id:
                 desired.append("telegram")
@@ -549,6 +557,16 @@ async def _send_organization_alert_async(
 ) -> Dict[str, Any]:
     """Async implementation of organization alert sending."""
     
+    # Short-circuit: disable email alerts entirely when feature is off
+    if channel == "email" and not getattr(settings, "ENABLE_EMAIL_ALERTS", False):
+        logger.info(
+            "Email alerts disabled; skipping send",
+            report_id=report_id,
+            organization_id=organization_id,
+            channel=channel
+        )
+        return {"status": "skipped", "message": "Email alerts disabled"}
+
     async with async_session_maker() as session:
         # Get report and organization data
         report_result = await session.execute(
@@ -710,6 +728,9 @@ async def _send_organization_alert_async(
                 # Escalation: try next channel in org.alert_channels
                 try:
                     channels = list(organization.alert_channels or [])
+                    # When email alerts are disabled, drop 'email' from escalation chain
+                    if not getattr(settings, "ENABLE_EMAIL_ALERTS", False):
+                        channels = [c for c in channels if c != "email"]
                     if channel in channels:
                         current_index = channels.index(channel)
                         if current_index + 1 < len(channels):
@@ -997,6 +1018,10 @@ async def _retry_failed_alerts_async() -> Dict[str, int]:
         
         for alert in alerts_to_retry:
             try:
+                # Skip retrying email alerts when disabled
+                if alert.channel.value == "email" and not getattr(settings, "ENABLE_EMAIL_ALERTS", False):
+                    results["skipped"] += 1
+                    continue
                 # Queue the retry job
                 if settings.ENABLE_WORKERS:
                     send_organization_alert.delay(
