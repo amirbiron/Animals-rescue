@@ -122,6 +122,8 @@ async def _maybe_prompt_reporter_phone(update: Update, context: ContextTypes.DEF
                 InlineKeyboardButton("לא עכשיו", callback_data="reporter_phone_no"),
             ]
         ])
+        # נסמן שצריך להמשיך להגשה אחרי עדכון מספר טלפון
+        context.user_data["resume_submit_after_phone"] = True
         target = getattr(update, 'callback_query', None)
         if target:
             await target.edit_message_text("נרצה לצרף את מספר הטלפון שלך כדי שהארגון יוכל לחזור אליך?", reply_markup=keyboard)
@@ -145,7 +147,8 @@ async def handle_reporter_phone_choice(update: Update, context: ContextTypes.DEF
         return ConversationHandler.END
     # reporter_phone_no -> continue to submit
     try:
-        await submit_report(update, context)
+        # אם אין מה לשאול יותר – נמשיך להגשה
+        return await submit_report(update, context)
     except Exception:
         pass
     return ConversationHandler.END
@@ -984,6 +987,9 @@ async def handle_report_confirmation(update: Update, context: ContextTypes.DEFAU
     action = query.data
     
     if action == "confirm_analysis":
+        # Optional reporter phone prompt before final submit (in case לא נשאל מוקדם יותר)
+        if await _maybe_prompt_reporter_phone(update, context):
+            return ConversationHandler.END
         return await submit_report(update, context)
     elif action == "modify_urgency":
         return await show_urgency_selection(update, context)
@@ -1793,6 +1799,12 @@ async def handle_phone_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
             await session.commit()
         context.user_data.pop("awaiting_phone", None)
         await update.message.reply_text("מספר הטלפון עודכן ✅")
+        # אם הזרימה הגיע מהגשת דיווח – נמשיך אוטומטית
+        if context.user_data.pop("resume_submit_after_phone", None):
+            try:
+                await submit_report(update, context)
+            except Exception:
+                pass
         return
     if context.user_data.get("awaiting_emergency_phone"):
         async with async_session_maker() as session:
@@ -4196,8 +4208,9 @@ def create_bot_application() -> Application:
         filters.Text(["👥 ניהול משתמשים"]),
         show_admin_users_menu
     ))
+    # תמיכה גם בגרסאות עם/בלי VS-16 כדי שהאימוג'י יזוהה תמיד
     application.add_handler(MessageHandler(
-        filters.Text(["🏢 ניהול ארגונים"]),
+        filters.Text(["🏢 ניהול ארגונים", "🏢\uFE0F ניהול ארגונים"]),
         show_admin_orgs_menu
     ))
     application.add_handler(MessageHandler(

@@ -294,6 +294,12 @@ class Settings(BaseSettings):
     EMAILS_FROM_EMAIL: Optional[EmailStr] = Field(default=None)
     EMAILS_FROM_NAME: str = Field(default="Animal Rescue Bot")
 
+    # Feature flag: enable/disable sending alert emails (default disabled)
+    ENABLE_EMAIL_ALERTS: bool = Field(
+        default=False,
+        description="If false, the system will not queue or send email alerts"
+    )
+
     # =========================================================================
     # SMS / WhatsApp Configuration (Twilio)
     # =========================================================================
