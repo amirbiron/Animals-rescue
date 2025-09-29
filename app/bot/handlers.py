@@ -12,7 +12,7 @@ import re
 import uuid
 from datetime import datetime, timezone
 from io import BytesIO
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import structlog
 from telegram import (
