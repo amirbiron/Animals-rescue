@@ -12,7 +12,7 @@ import re
 import uuid
 from datetime import datetime, timezone
 from io import BytesIO
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import structlog
 from telegram import (
@@ -107,6 +107,61 @@ def _get_google_import_lock(user_id: int) -> asyncio.Lock:
 nlp_service = NLPService()
 geocoding_service = GeocodingService()
 file_storage = FileStorageService()
+
+
+# =============================================================================
+# Organization classification helper
+# =============================================================================
+
+def classify_org_type_from_place(place: Dict[str, Any]) -> OrganizationType:
+    """Heuristic classification of organization type from Google Places result.
+
+    Uses Google "types" plus robust Hebrew/English keywords to detect shelters,
+    rescue orgs, volunteer groups, hospitals, emergency vets, and clinics.
+    """
+    name_raw = place.get("name") or ""
+    name = name_raw.lower()
+    types = place.get("types", []) or []
+
+    # Strong type-based signals first
+    if "animal_shelter" in types:
+        return OrganizationType.ANIMAL_SHELTER
+
+    if "hospital" in types or "בית חולים" in name or "hospital" in name:
+        return OrganizationType.ANIMAL_HOSPITAL
+
+    if "veterinary_care" in types:
+        # Detect emergency vets by name hints
+        emergency_hints = ["24/7", "24 7", "חירום", "emergency", "מוקד"]
+        if any(h in name for h in emergency_hints):
+            return OrganizationType.EMERGENCY_VET
+        return OrganizationType.VET_CLINIC
+
+    # Shelter / rescue / volunteer keywords (Hebrew + English)
+    shelter_keywords = [
+        "shelter", "מקלט", "כלביה", "כלבייה", "חתוליה", "פונדק בעלי חיים", "adoption", "אימוץ",
+        "pound",
+    ]
+    rescue_keywords = [
+        "rescue", "הצלה", "חילוץ", "עמותה", "עמותת", "אגודה", "אגודת", "צער בעלי חיים",
+        "תנו לחיות לחיות", "ע\"ר", "ע" "ר",
+    ]
+    volunteer_keywords = ["מתנדב", "מתנדבים", "קבוצת חילוץ", "קבוצת"]
+
+    if any(k in name for k in shelter_keywords):
+        return OrganizationType.ANIMAL_SHELTER
+    if any(k in name for k in rescue_keywords):
+        return OrganizationType.RESCUE_ORG
+    if any(k in name for k in volunteer_keywords):
+        return OrganizationType.VOLUNTEER_GROUP
+
+    # Vet-related fallbacks by name
+    vet_name_hints = ["vet", "וטרינר", "מרפאה", "מרפאה וטרינרית"]
+    if any(h in name for h in vet_name_hints):
+        return OrganizationType.VET_CLINIC
+
+    # Default conservative fallback: clinic (was the previous default)
+    return OrganizationType.VET_CLINIC
 
 
 async def _maybe_prompt_reporter_phone(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
@@ -2662,11 +2717,7 @@ async def handle_admin_import_location_inputs(update: Update, context: ContextTy
                     exists = await session.execute(select(Organization).where(Organization.google_place_id == place["place_id"]))
                     if exists.scalar_one_or_none():
                         continue
-                    org_type = (
-                        OrganizationType.ANIMAL_SHELTER
-                        if any(k in (place.get("name") or "").lower() for k in ["shelter", "rescue", "עמותה", "מקלט"]) else
-                        OrganizationType.VET_CLINIC
-                    )
+                    org_type = classify_org_type_from_place(place)
                     org = Organization(
                         name=place["name"],
                         organization_type=org_type,
@@ -2755,11 +2806,7 @@ async def handle_admin_import_google_input(update: Update, context: ContextTypes
                     exists = await session.execute(select(Organization).where(Organization.google_place_id == place["place_id"]))
                     if exists.scalar_one_or_none():
                         continue
-                    org_type = (
-                        OrganizationType.ANIMAL_SHELTER
-                        if any(k in (place.get("name") or "").lower() for k in ["shelter", "rescue", "עמותה", "מקלט"]) else
-                        OrganizationType.VET_CLINIC
-                    )
+                    org_type = classify_org_type_from_place(place)
                     org = Organization(
                         name=place["name"],
                         organization_type=org_type,
@@ -2889,11 +2936,7 @@ async def handle_admin_import_cities_run(update: Update, context: ContextTypes.D
                                 )
                                 if exists_q.scalar_one_or_none():
                                     continue
-                                org_type = (
-                                    OrganizationType.ANIMAL_SHELTER
-                                    if any(k in (place.get("name") or "").lower() for k in ["shelter", "rescue", "עמותה", "מקלט"]) else
-                                    OrganizationType.VET_CLINIC
-                                )
+                                org_type = classify_org_type_from_place(place)
                                 org = Organization(
                                     name=place.get("name"),
                                     organization_type=org_type,
