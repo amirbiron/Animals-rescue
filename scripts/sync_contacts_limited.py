@@ -121,6 +121,7 @@ async def _process(limit: int) -> dict:
                     desired.append("email")
                 if org.telegram_chat_id:
                     desired.append("telegram")
+                # Prefer mobile-only channels
                 if desired:
                     seen = set()
                     org.alert_channels = [c for c in desired if not (c in seen or seen.add(c))]
