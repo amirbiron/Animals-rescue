@@ -277,7 +277,7 @@ async def _process_new_report_async(report_id: str) -> Dict[str, Any]:
     return results
 
 
-@job("maintenance", timeout="5m", connection=redis_queue_sync)
+@job("maintenance", timeout="5m", connection=redis_queue_sync, result_ttl=0)
 def reconcile_alert_channels() -> Dict[str, int]:
     """Ensure each organization's alert_channels reflect available contact methods.
 
@@ -598,6 +598,8 @@ async def _send_organization_alert_async(
             logger.warning(
                 "No recipient found for alert channel",
                 org_id=organization_id,
+                report_id=report_id,
+                report_public_id=getattr(report, 'public_id', None),
                 channel=channel
             )
             return {"status": "failed", "message": f"No {channel} contact configured"}
@@ -646,6 +648,34 @@ async def _send_organization_alert_async(
                 )
             elif channel == "sms":
                 try:
+                    # Log SMS recipients (masked in production), with green ANSI color
+                    GREEN = "\033[92m"
+                    RESET = "\033[0m"
+
+                    def _mask_phone_for_log(phone: str) -> str:
+                        if not phone:
+                            return phone
+                        prefix = "+" if phone.startswith("+") else ""
+                        rest = phone[len(prefix):]
+                        if len(rest) <= 4:
+                            return prefix + rest
+                        return prefix + ("*" * (len(rest) - 4)) + rest[-4:]
+
+                    phone_to_log = recipient
+                    try:
+                        # Mask in production for privacy
+                        if getattr(settings, "is_production", False):
+                            phone_to_log = _mask_phone_for_log(recipient)
+                    except Exception:
+                        pass
+
+                    colored_recipient = f"{GREEN}{phone_to_log}{RESET}"
+                    logger.info(
+                        "SMS recipients",
+                        recipients=[colored_recipient],
+                        masked=getattr(settings, "is_production", False)
+                    )
+
                     sms_service = get_sms_service()
                     sms_text = message_data["message"]
                     sms_res = await sms_service.send(recipient, sms_text)
@@ -715,7 +745,10 @@ async def _send_organization_alert_async(
                 "Alert sent",
                 alert_id=str(alert.id),
                 status=alert.status.value,
-                channel=channel
+                channel=channel,
+                report_id=str(report.id),
+                report_public_id=getattr(report, 'public_id', None),
+                organization_id=str(organization.id)
             )
             
             return {
@@ -737,7 +770,15 @@ async def _send_organization_alert_async(
             
             await session.commit()
             
-            logger.error("Alert sending failed", error=str(e), alert_id=str(alert.id))
+            logger.error(
+                "Alert sending failed",
+                error=str(e),
+                alert_id=str(alert.id),
+                report_id=str(report.id),
+                report_public_id=getattr(report, 'public_id', None),
+                organization_id=str(organization.id),
+                channel=channel
+            )
             raise
 
 

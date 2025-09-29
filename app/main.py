@@ -241,8 +241,8 @@ async def lifespan(app: FastAPI):
         # Redis is critical for background jobs
         raise
     
-    # Start background workers if enabled and not in testing mode
-    if not settings.is_testing and settings.ENABLE_WORKERS:
+    # Start background workers inside the web app only if explicitly requested
+    if not settings.is_testing and settings.ENABLE_WORKERS and getattr(settings, "START_WORKERS_IN_APP", False):
         try:
             from app.workers.manager import start_workers
             await start_workers()

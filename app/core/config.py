@@ -333,6 +333,8 @@ class Settings(BaseSettings):
     ENABLE_WORKERS: bool = Field(default=False, description="Enable RQ workers (separate service recommended)")
     WORKER_PROCESSES: int = Field(default=2, description="Number of worker processes")
     WORKER_TIMEOUT: int = Field(default=300, description="Worker job timeout in seconds")
+    # If true, start workers inside the web app process (not recommended in production)
+    START_WORKERS_IN_APP: bool = Field(default=False, description="Start RQ workers inside the web app (use only for dev)")
     
     # Job retry configuration
     JOB_MAX_RETRIES: int = Field(default=3)
@@ -559,11 +561,50 @@ def setup_logging() -> None:
         cache_logger_on_first_use=True,
     )
 
-    # Configure standard library logging
-    logging.basicConfig(
-        level=getattr(logging, settings.LOG_LEVEL.upper()),
-        format="%(message)s" if settings.LOG_FORMAT == "json" else None,
-    )
+    # Configure standard library logging (with optional colorlog)
+    try:
+        if settings.LOG_FORMAT == "pretty":
+            from colorlog import ColoredFormatter  # type: ignore
+            handler = logging.StreamHandler()
+            handler.setLevel(getattr(logging, settings.LOG_LEVEL.upper()))
+            formatter = ColoredFormatter(
+                "%(log_color)s%(levelname)-8s%(reset)s %(cyan)s%(name)s%(reset)s %(message_log_color)s%(message)s",
+                log_colors={
+                    "DEBUG": "white",
+                    "INFO": "green",
+                    "WARNING": "yellow",
+                    "ERROR": "red",
+                    "CRITICAL": "bold_red",
+                },
+                secondary_log_colors={
+                    "message": {
+                        "INFO": "green",
+                        "WARNING": "yellow",
+                        "ERROR": "red",
+                        "CRITICAL": "bold_red",
+                    }
+                },
+                reset=True,
+                style="%",
+            )
+            handler.setFormatter(formatter)
+            root_logger = logging.getLogger()
+            # Clear existing handlers to avoid duplicate logs
+            for h in list(root_logger.handlers):
+                root_logger.removeHandler(h)
+            root_logger.addHandler(handler)
+            root_logger.setLevel(getattr(logging, settings.LOG_LEVEL.upper()))
+        else:
+            logging.basicConfig(
+                level=getattr(logging, settings.LOG_LEVEL.upper()),
+                format="%(message)s",
+            )
+    except Exception:
+        # Fallback to non-colored basic config if colorlog missing or any error occurs
+        logging.basicConfig(
+            level=getattr(logging, settings.LOG_LEVEL.upper()),
+            format="%(message)s" if settings.LOG_FORMAT == "json" else None,
+        )
 
     # Attach redaction filter to standard logging to catch third-party logs
     class _StdlibRedactFilter(logging.Filter):
