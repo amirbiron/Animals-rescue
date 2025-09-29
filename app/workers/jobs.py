@@ -1709,7 +1709,6 @@ def schedule_recurring_jobs():
             cron_string=cron_expr,
             func=reconcile_alert_channels,
             timeout="5m",
-            result_ttl=0,
             use_local_timezone=False
         )
     except Exception:
