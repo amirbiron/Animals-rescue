@@ -646,6 +646,34 @@ async def _send_organization_alert_async(
                 )
             elif channel == "sms":
                 try:
+                    # Log SMS recipients (masked in production), with green ANSI color
+                    GREEN = "\033[92m"
+                    RESET = "\033[0m"
+
+                    def _mask_phone_for_log(phone: str) -> str:
+                        if not phone:
+                            return phone
+                        prefix = "+" if phone.startswith("+") else ""
+                        rest = phone[len(prefix):]
+                        if len(rest) <= 4:
+                            return prefix + rest
+                        return prefix + ("*" * (len(rest) - 4)) + rest[-4:]
+
+                    phone_to_log = recipient
+                    try:
+                        # Mask in production for privacy
+                        if getattr(settings, "is_production", False):
+                            phone_to_log = _mask_phone_for_log(recipient)
+                    except Exception:
+                        pass
+
+                    colored_recipient = f"{GREEN}{phone_to_log}{RESET}"
+                    logger.info(
+                        "SMS recipients",
+                        recipients=[colored_recipient],
+                        masked=getattr(settings, "is_production", False)
+                    )
+
                     sms_service = get_sms_service()
                     sms_text = message_data["message"]
                     sms_res = await sms_service.send(recipient, sms_text)
