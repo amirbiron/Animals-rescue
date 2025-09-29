@@ -598,6 +598,8 @@ async def _send_organization_alert_async(
             logger.warning(
                 "No recipient found for alert channel",
                 org_id=organization_id,
+                report_id=report_id,
+                report_public_id=getattr(report, 'public_id', None),
                 channel=channel
             )
             return {"status": "failed", "message": f"No {channel} contact configured"}
@@ -743,7 +745,10 @@ async def _send_organization_alert_async(
                 "Alert sent",
                 alert_id=str(alert.id),
                 status=alert.status.value,
-                channel=channel
+                channel=channel,
+                report_id=str(report.id),
+                report_public_id=getattr(report, 'public_id', None),
+                organization_id=str(organization.id)
             )
             
             return {
@@ -765,7 +770,15 @@ async def _send_organization_alert_async(
             
             await session.commit()
             
-            logger.error("Alert sending failed", error=str(e), alert_id=str(alert.id))
+            logger.error(
+                "Alert sending failed",
+                error=str(e),
+                alert_id=str(alert.id),
+                report_id=str(report.id),
+                report_public_id=getattr(report, 'public_id', None),
+                organization_id=str(organization.id),
+                channel=channel
+            )
             raise
 
 
