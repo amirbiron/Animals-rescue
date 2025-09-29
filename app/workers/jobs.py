@@ -277,7 +277,7 @@ async def _process_new_report_async(report_id: str) -> Dict[str, Any]:
     return results
 
 
-@job("maintenance", timeout="5m", connection=redis_queue_sync)
+@job("maintenance", timeout="5m", connection=redis_queue_sync, result_ttl=0)
 def reconcile_alert_channels() -> Dict[str, int]:
     """Ensure each organization's alert_channels reflect available contact methods.
 
@@ -1668,6 +1668,7 @@ def schedule_recurring_jobs():
             cron_string=cron_expr,
             func=reconcile_alert_channels,
             timeout="5m",
+            result_ttl=0,
             use_local_timezone=False
         )
     except Exception:
