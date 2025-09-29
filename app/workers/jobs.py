@@ -1689,6 +1689,10 @@ def enqueue_or_run(func, *args, **kwargs):
         return asyncio.create_task(_sync_google_places_data_async())
     if name == "generate_daily_statistics":
         return asyncio.create_task(_generate_daily_statistics_async())
+    if name == "enrich_org_contacts_with_serpapi":
+        return asyncio.create_task(_enrich_org_contacts_with_serpapi_async())
+    if name == "reconcile_alert_channels":
+        return asyncio.create_task(_reconcile_alert_channels_async())
     # Fallback: run sync function inline
     return func(*args, **kwargs)
 
