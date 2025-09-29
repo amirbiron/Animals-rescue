@@ -4196,8 +4196,9 @@ def create_bot_application() -> Application:
         filters.Text(["👥 ניהול משתמשים"]),
         show_admin_users_menu
     ))
+    # תמיכה גם בגרסאות עם/בלי VS-16 כדי שהאימוג'י יזוהה תמיד
     application.add_handler(MessageHandler(
-        filters.Text(["🏢 ניהול ארגונים"]),
+        filters.Text(["🏢 ניהול ארגונים", "🏢\uFE0F ניהול ארגונים"]),
         show_admin_orgs_menu
     ))
     application.add_handler(MessageHandler(

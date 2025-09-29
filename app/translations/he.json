@@ -191,7 +191,7 @@
   "stats_this_week": "📅 השבוע: {count} דיווחים",
   
   "admin_users": "👥 ניהול משתמשים",
-  "admin_organizations": "🏢 ניהול ארגונים",
+  "admin_organizations": "🏢\uFE0F ניהול ארגונים",
   "admin_reports": "📊 דוחות מערכת",
   "admin_settings": "🔧 הגדרות מערכת",
   
