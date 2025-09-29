@@ -544,16 +544,30 @@ class GoogleService:
             return []
         location = (city_location["latitude"], city_location["longitude"]) 
         search_terms = [
+            # English
             f"animal shelter {city}",
             f"pet rescue {city}",
             f"animal rescue {city}",
             f"rescue group {city}",
             f"volunteer animal rescue {city}",
+            f"animal adoption {city}",
+            f"dog shelter {city}",
+            f"cat shelter {city}",
+            f"humane society {city}",
+            # Hebrew
             f"עמותת בעלי חיים {city}",
+            f"עמותה להצלת בעלי חיים {city}",
+            f"הצלת בעלי חיים {city}",
+            f"חילוץ בעלי חיים {city}",
             f"קבוצת חילוץ בעלי חיים {city}",
             f"מתנדבי חילוץ בעלי חיים {city}",
             f"מתנדבים בעלי חיים {city}",
             f"מקלט לבעלי חיים {city}",
+            f"כלביה {city}",
+            f"חתוליה {city}",
+            f"אימוץ בעלי חיים {city}",
+            f"צער בעלי חיים {city}",
+            f"תנו לחיות לחיות {city}",
         ]
         all_results: List[Dict[str, Any]] = []
         seen_place_ids: set[str] = set()
@@ -570,10 +584,15 @@ class GoogleService:
                     if place_id and place_id not in seen_place_ids:
                         types = result.get("types", [])
                         name = (result.get("name") or "").lower()
-                        # Heuristics: shelter/rescue/volunteer keywords or types
+                        # Heuristics: shelter/rescue/volunteer/adoption keywords or known types
+                        keywords = [
+                            "shelter", "rescue", "volunteer", "adoption", "humane", "pound",
+                            "עמותה", "עמותת", "מקלט", "כלביה", "כלבייה", "חתוליה", "חילוץ", "הצלה", "אימוץ",
+                            "צער בעלי חיים", "תנו לחיות לחיות",
+                        ]
                         if (
-                            any(k in name for k in ["shelter", "rescue", "volunteer", "עמותה", "מקלט", "מתנדב", "מתנדבים", "חילוץ"]) or
-                            any(t in types for t in ["animal_shelter"])
+                            any(k in name for k in keywords) or
+                            any(t in types for t in ["animal_shelter"]) 
                         ):
                             all_results.append(result)
                             seen_place_ids.add(place_id)
