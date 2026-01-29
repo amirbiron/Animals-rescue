@@ -1,0 +1,500 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Dynavap - יומן אידוי רגוע</title>
+  <style>
+    :root{
+      --bg:#0f1220;
+      --card:#171a2b;
+      --muted:#9aa3b2;
+      --text:#e9eef7;
+      --line:#262a41;
+      --good:#7CFFB2;
+      --warn:#ffd37c;
+      --bad:#ff7c7c;
+      --pill:#222746;
+      --shadow: 0 10px 30px rgba(0,0,0,.35);
+      --radius: 16px;
+      --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      --sans: system-ui, -apple-system, Segoe UI, Roboto, Arial;
+    }
+    body{
+      margin:0;
+      font-family:var(--sans);
+      background: radial-gradient(1200px 700px at 80% 10%, #26306a 0%, var(--bg) 55%),
+                  radial-gradient(900px 600px at 10% 90%, #1e5d49 0%, var(--bg) 55%);
+      color:var(--text);
+      min-height:100vh;
+    }
+    .wrap{ max-width: 980px; margin: 0 auto; padding: 18px; }
+    .top{
+      display:flex;
+      align-items:flex-start;
+      justify-content:space-between;
+      gap:12px;
+      margin-bottom:14px;
+    }
+    .title{
+      font-size: 18px; /* רגיל, לא ענק */
+      margin: 0;
+      line-height: 1.25;
+      letter-spacing: .2px;
+    }
+    .subtitle{
+      margin:6px 0 0;
+      color:var(--muted);
+      font-size: 13px;
+    }
+    .badge{
+      display:inline-flex;
+      gap:8px;
+      align-items:center;
+      padding:10px 12px;
+      background: rgba(0,0,0,.25);
+      border:1px solid rgba(255,255,255,.08);
+      border-radius: 999px;
+      box-shadow: var(--shadow);
+      font-size: 13px;
+      white-space: nowrap;
+    }
+    .grid{
+      display:grid;
+      grid-template-columns: 1.2fr .8fr;
+      gap:14px;
+    }
+    @media (max-width: 880px){
+      .grid{ grid-template-columns: 1fr; }
+    }
+    .card{
+      background: rgba(23,26,43,.78);
+      border: 1px solid rgba(255,255,255,.08);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 14px;
+      backdrop-filter: blur(8px);
+    }
+    .card h2{
+      font-size: 15px;
+      margin: 0 0 10px;
+      font-weight: 650;
+    }
+    .row{
+      display:flex;
+      gap:10px;
+      flex-wrap:wrap;
+      align-items:center;
+    }
+    .field{
+      display:flex;
+      flex-direction:column;
+      gap:6px;
+      min-width: 180px;
+      flex:1;
+    }
+    label{ font-size: 12px; color: var(--muted); }
+    input, select, textarea{
+      width:100%;
+      padding:10px 12px;
+      border-radius: 12px;
+      border: 1px solid rgba(255,255,255,.10);
+      background: rgba(0,0,0,.20);
+      color: var(--text);
+      outline:none;
+      font-size: 14px;
+    }
+    textarea{ min-height: 92px; resize: vertical; }
+    .btn{
+      cursor:pointer;
+      padding:10px 12px;
+      border-radius: 12px;
+      border: 1px solid rgba(255,255,255,.12);
+      background: linear-gradient(180deg, rgba(255,255,255,.08), rgba(0,0,0,.08));
+      color: var(--text);
+      font-size: 14px;
+      transition: transform .06s ease, border-color .2s ease;
+      user-select:none;
+    }
+    .btn:active{ transform: translateY(1px); }
+    .btn.primary{
+      border-color: rgba(124,255,178,.35);
+      box-shadow: 0 0 0 6px rgba(124,255,178,.08);
+    }
+    .pill{
+      display:inline-flex;
+      align-items:center;
+      gap:8px;
+      padding:8px 10px;
+      background: rgba(34,39,70,.65);
+      border:1px solid rgba(255,255,255,.08);
+      border-radius: 999px;
+      font-size: 13px;
+      color: var(--text);
+    }
+    .muted{ color: var(--muted); }
+    .hr{
+      height:1px;
+      background: rgba(255,255,255,.08);
+      margin: 12px 0;
+    }
+    .log{
+      display:flex;
+      flex-direction:column;
+      gap:8px;
+    }
+    .item{
+      border:1px solid rgba(255,255,255,.08);
+      background: rgba(0,0,0,.18);
+      border-radius: 14px;
+      padding: 10px 12px;
+    }
+    .item .meta{
+      display:flex;
+      gap:10px;
+      flex-wrap:wrap;
+      align-items:center;
+      margin-bottom:6px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .chip{
+      font-family: var(--mono);
+      font-size: 12px;
+      padding:4px 8px;
+      border-radius: 999px;
+      background: rgba(255,255,255,.06);
+      border:1px solid rgba(255,255,255,.08);
+      color: var(--text);
+    }
+    .status.good{ color: var(--good); }
+    .status.warn{ color: var(--warn); }
+    .status.bad{ color: var(--bad); }
+    .small{ font-size:12px; }
+    .hint{ font-size:12px; color: var(--muted); line-height: 1.35; }
+    .kbd{
+      font-family: var(--mono);
+      background: rgba(255,255,255,.06);
+      border:1px solid rgba(255,255,255,.10);
+      padding: 2px 6px;
+      border-radius: 8px;
+      font-size: 12px;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="top">
+      <div>
+        <h1 class="title">🦦 יומן אידוי רגוע - Dynavap + אבקנים</h1>
+        <p class="subtitle">במקום לזכור בראש - שומרים פה: כמות, קליקים, טעם, ואיך הראש מרגיש. רגוע, זורם, בלי לחץ.</p>
+      </div>
+      <div class="badge" id="nowBadge" title="הזמן המקומי שלך">
+        <span>🕯️</span>
+        <span id="nowText">...</span>
+      </div>
+    </div>
+
+    <div class="grid">
+      <!-- Left -->
+      <div class="card">
+        <h2>הוספת סשן</h2>
+
+        <div class="row">
+          <div class="field">
+            <label>חומר</label>
+            <select id="material">
+              <option value="אבקנים">אבקנים</option>
+              <option value="ירוק טחון">ירוק טחון</option>
+              <option value="תערובת">תערובת</option>
+            </select>
+          </div>
+
+          <div class="field">
+            <label>כמות (mg)</label>
+            <input id="mg" type="number" inputmode="numeric" min="0" step="1" placeholder="למשל 80" />
+          </div>
+
+          <div class="field">
+            <label>קאפ / מצב</label>
+            <select id="capMode">
+              <option value="Half Bowl">Half Bowl</option>
+              <option value="Full Bowl">Full Bowl</option>
+              <option value="Micro">Micro</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="row" style="margin-top:10px">
+          <div class="field">
+            <label>מספר קליקים (בערך)</label>
+            <input id="clicks" type="number" inputmode="numeric" min="0" step="1" placeholder="למשל 2" />
+          </div>
+
+          <div class="field">
+            <label>חימום</label>
+            <select id="heat">
+              <option value="טורץ - רגיל">טורץ - רגיל</option>
+              <option value="טורץ - עדין">טורץ - עדין</option>
+              <option value="אינדוקשן">אינדוקשן</option>
+              <option value="אחר">אחר</option>
+            </select>
+          </div>
+
+          <div class="field">
+            <label>תחושה</label>
+            <select id="vibe">
+              <option value="צ'יל">צ'יל</option>
+              <option value="חד">חד</option>
+              <option value="כבד">כבד</option>
+              <option value="יצירתי">יצירתי</option>
+              <option value="חברתי">חברתי</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="row" style="margin-top:10px">
+          <div class="field" style="flex: 1 1 100%">
+            <label>הערה קצרה (טעם / שיעול / מצב רוח / מה שבא)</label>
+            <textarea id="note" placeholder="למשל: טעם אגוזי, קליק שני נותן ענן יפה, בלי שיעול"></textarea>
+          </div>
+        </div>
+
+        <div class="row" style="margin-top:10px; justify-content:space-between">
+          <div class="row">
+            <button class="btn primary" id="addBtn">➕ שמור סשן</button>
+            <button class="btn" id="clearBtn" title="מוחק רק את הטופס">נקה טופס</button>
+          </div>
+          <div class="pill" id="estPill" title="הערכה קטנה לפי הכמות והמצב">
+            📌 <span class="muted">הערכה:</span> <span id="estText">-</span>
+          </div>
+        </div>
+
+        <div class="hr"></div>
+
+        <div class="hint">
+          טיפ קטן: אם אתה רוצה שזה ירגיש כמו "מיני מעבדה" - תכתוב ב-note גם איזה חימום עשית (אזור הקאפ, סיבובים, מרחק),
+          זה עושה קסם לזיכרון בפעם הבאה.
+          <br/>
+          קיצור מקלדת: <span class="kbd">Ctrl</span> + <span class="kbd">Enter</span> לשמירה מהירה.
+        </div>
+      </div>
+
+      <!-- Right -->
+      <div class="card">
+        <h2>היומן</h2>
+        <div class="row" style="justify-content:space-between; margin-bottom:8px">
+          <div class="pill">
+            📚 <span class="muted">סשנים:</span> <span id="count">0</span>
+          </div>
+          <div class="row">
+            <button class="btn" id="exportBtn" title="מעתיק JSON ללוח">ייצוא JSON</button>
+            <button class="btn" id="wipeBtn" title="מוחק את היומן (LocalStorage)">מחיקה</button>
+          </div>
+        </div>
+
+        <div class="row" style="margin-bottom:10px">
+          <div class="field" style="min-width: 220px;">
+            <label>פילטר</label>
+            <select id="filter">
+              <option value="all">הכל</option>
+              <option value="אבקנים">רק אבקנים</option>
+              <option value="ירוק טחון">רק ירוק טחון</option>
+              <option value="תערובת">רק תערובת</option>
+              <option value="יצירתי">תחושה - יצירתי</option>
+              <option value="צ'יל">תחושה - צ'יל</option>
+              <option value="כבד">תחושה - כבד</option>
+            </select>
+          </div>
+
+          <div class="field" style="min-width: 220px;">
+            <label>חיפוש בהערות</label>
+            <input id="search" type="text" placeholder="מילה או טעם" />
+          </div>
+        </div>
+
+        <div class="log" id="log"></div>
+
+        <div class="hr"></div>
+        <div class="hint small">
+          הכל נשמר רק אצלך בדפדפן (LocalStorage). אם תרצה להעביר למקום אחר - ייצוא JSON וזהו.
+        </div>
+      </div>
+    </div>
+  </div>
+
+<script>
+  const LS_KEY = "dynavap_log_v1";
+
+  const el = (id) => document.getElementById(id);
+
+  function nowLocal() {
+    const d = new Date();
+    return d.toLocaleString("he-IL", { hour12:false });
+  }
+
+  function loadLog() {
+    try {
+      const raw = localStorage.getItem(LS_KEY);
+      return raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
+    }
+  }
+
+  function saveLog(items) {
+    localStorage.setItem(LS_KEY, JSON.stringify(items));
+  }
+
+  function classify(mg, clicks, material) {
+    // סתם הערכה קלילה - לא מדע, רק "וייב"
+    const m = Number(mg || 0);
+    const c = Number(clicks || 0);
+    const base = (material === "אבקנים") ? 1.35 : (material === "תערובת" ? 1.15 : 1.0);
+    const score = (m * base) + (c * 18);
+    if (score < 70) return { label: "קליל", cls: "good" };
+    if (score < 140) return { label: "בינוני", cls: "warn" };
+    return { label: "חזק", cls: "bad" };
+  }
+
+  function fmtItem(item) {
+    const status = classify(item.mg, item.clicks, item.material);
+    return `
+      <div class="item">
+        <div class="meta">
+          <span class="chip">${item.time}</span>
+          <span class="chip">${item.material}</span>
+          <span class="chip">${item.capMode}</span>
+          <span class="chip">${item.heat}</span>
+          <span class="chip">${item.mg}mg</span>
+          <span class="chip">${item.clicks} קליקים</span>
+          <span class="chip">תחושה: ${item.vibe}</span>
+          <span class="status ${status.cls}">• ${status.label}</span>
+        </div>
+        ${item.note ? `<div>${escapeHtml(item.note)}</div>` : `<div class="muted">בלי הערה - רק זרימה 😌</div>`}
+      </div>
+    `;
+  }
+
+  function escapeHtml(str){
+    return String(str)
+      .replaceAll("&","&amp;")
+      .replaceAll("<","&lt;")
+      .replaceAll(">","&gt;")
+      .replaceAll('"',"&quot;")
+      .replaceAll("'","&#039;");
+  }
+
+  function matchesFilter(item, filterVal) {
+    if (filterVal === "all") return true;
+    if (filterVal === "אבקנים" || filterVal === "ירוק טחון" || filterVal === "תערובת") {
+      return item.material === filterVal;
+    }
+    // vibe filters
+    return item.vibe === filterVal;
+  }
+
+  function render() {
+    const items = loadLog();
+    const filterVal = el("filter").value;
+    const q = el("search").value.trim().toLowerCase();
+
+    const filtered = items.filter(it => {
+      if (!matchesFilter(it, filterVal)) return false;
+      if (!q) return true;
+      return (it.note || "").toLowerCase().includes(q);
+    });
+
+    el("count").textContent = items.length;
+    el("log").innerHTML = filtered.length
+      ? filtered.map(fmtItem).join("")
+      : `<div class="muted">אין פה כלום עדיין. תוסיף סשן ראשון ותן לגלים להתחיל 🌊</div>`;
+  }
+
+  function updateEstimatePill() {
+    const material = el("material").value;
+    const mg = el("mg").value;
+    const clicks = el("clicks").value;
+    const status = classify(mg, clicks, material);
+    el("estText").textContent = status.label;
+    el("estPill").style.borderColor =
+      status.cls === "good" ? "rgba(124,255,178,.28)" :
+      status.cls === "warn" ? "rgba(255,211,124,.28)" :
+      "rgba(255,124,124,.28)";
+  }
+
+  function clearForm() {
+    el("material").value = "אבקנים";
+    el("mg").value = "";
+    el("capMode").value = "Half Bowl";
+    el("clicks").value = "";
+    el("heat").value = "טורץ - רגיל";
+    el("vibe").value = "צ'יל";
+    el("note").value = "";
+    updateEstimatePill();
+  }
+
+  function addItem() {
+    const material = el("material").value;
+    const mg = Number(el("mg").value || 0);
+    const capMode = el("capMode").value;
+    const clicks = Number(el("clicks").value || 0);
+    const heat = el("heat").value;
+    const vibe = el("vibe").value;
+    const note = el("note").value.trim();
+
+    const items = loadLog();
+    items.unshift({
+      id: crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random().toString(16).slice(2),
+      time: nowLocal(),
+      material, mg, capMode, clicks, heat, vibe, note
+    });
+    saveLog(items);
+    render();
+    clearForm();
+  }
+
+  function exportJson() {
+    const items = loadLog();
+    const json = JSON.stringify(items, null, 2);
+    navigator.clipboard?.writeText(json).then(() => {
+      alert("הועתק JSON ללוח ✨");
+    }).catch(() => {
+      prompt("העתק ידנית:", json);
+    });
+  }
+
+  function wipeAll() {
+    const ok = confirm("למחוק את כל היומן? זה מוחק רק מהדפדפן.");
+    if (!ok) return;
+    localStorage.removeItem(LS_KEY);
+    render();
+  }
+
+  // init
+  el("nowText").textContent = nowLocal();
+  setInterval(() => el("nowText").textContent = nowLocal(), 1000);
+
+  ["material","mg","clicks"].forEach(id => el(id).addEventListener("input", updateEstimatePill));
+  el("capMode").addEventListener("change", updateEstimatePill);
+  el("heat").addEventListener("change", updateEstimatePill);
+  el("vibe").addEventListener("change", updateEstimatePill);
+
+  el("addBtn").addEventListener("click", addItem);
+  el("clearBtn").addEventListener("click", clearForm);
+  el("exportBtn").addEventListener("click", exportJson);
+  el("wipeBtn").addEventListener("click", wipeAll);
+
+  el("filter").addEventListener("change", render);
+  el("search").addEventListener("input", render);
+
+  // Ctrl+Enter to save
+  document.addEventListener("keydown", (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === "Enter") addItem();
+  });
+
+  updateEstimatePill();
+  render();
+</script>
+</body>
+</html>
