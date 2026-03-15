@@ -1,0 +1,12 @@
+{
+  "name": "בוט חילוץ בעלי חיים",
+  "repo": "https://github.com/amirbiron/Animals-rescue",
+  "tags": ["python", "fastapi", "telegram-bot", "postgresql", "postgis", "redis", "nlp", "docker", "google-apis", "twilio"],
+  "highlights": [
+    "מערכת חילוץ בעלי חיים מלאה עם ממשק טלגרם ולוח בקרה למנהלים",
+    "התאמה גיאוגרפית אוטומטית של דיווחים לארגונים באמצעות PostGIS",
+    "תמיכה בריבוי שפות (עברית, ערבית, אנגלית) עם NLP לזיהוי דחיפות",
+    "התראות מולטי-ערוציות: טלגרם, מייל, SMS ו-WhatsApp",
+    "עיבוד רקע אסינכרוני עם Redis/RQ וניטור Prometheus"
+  ]
+}
