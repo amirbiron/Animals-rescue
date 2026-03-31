@@ -342,6 +342,37 @@ python -c "import tenacity; print(tenacity.__version__)"
 - Webhook של טלגרם: `getWebhookInfo` או `setWebhook`  
 - Workers: בדיקת סטטוס, ריסטארט עם docker-compose  
 
+## 📂 Project Docs & Tools
+
+בפרויקט קיימים מסמכים וסקריפטים שימושיים לניהול ושיפור המערכת:
+
+- `docs/data-collection-implementation.md`  
+  מדריך טכני ליישום – כולל מבנה טבלאות, מודלים, סקריפטים לאיסוף ואימות נתונים.
+
+- `docs/next-steps-playbook.md`  
+  מדריך למפתחים – צעדים מיידיים, תיקונים בקוד, בדיקות קריטיות ושיתופי פעולה מומלצים.
+
+- `docs/vision-and-improvement.md`  
+  מסמך שיפור מקיף – מפת דרכים, אתגרים צפויים, עלויות משוערות ושיפורים עתידיים.
+
+- `docs/seed/organizations_seed.csv`  
+  נתוני seed ראשוניים של ארגונים (שם, כתובת, טלפון, מייל וכו׳) לטעינה במסד או בדיקות.
+
+- `scripts/collect_organizations.py`  
+  סקריפט איסוף אוטומטי מ־Google Places או מקובץ CSV ידני.  
+  שימוש:  
+  ```bash
+  python scripts/collect_organizations.py --source google --cities "תל אביב,ירושלים"
+  python scripts/collect_organizations.py --source manual --file docs/seed/organizations_seed.csv
+  ```
+
+- `scripts/initial_data.sql`  
+  סקריפט SQL לטעינת נתוני ארגונים ראשוניים ישירות למסד PostgreSQL.  
+  שימוש:
+  ```bash
+  psql -U postgres -d animal_rescue -f scripts/initial_data.sql
+  ```
+
 ---
 
 **נבנה באהבה ❤️ עבור ארגוני רווחת בעלי חיים ומתנדבי חילוץ**  
